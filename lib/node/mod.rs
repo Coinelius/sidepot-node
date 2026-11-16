@@ -506,6 +506,19 @@ where
         )?)
     }
 
+    /// Sidepot: the game as it will stand once every L1 block up to `main_tip` is processed (not consensus
+    /// state, see [`crate::game::preview`]). `None` while the game is off.
+    pub fn preview_game(
+        &self,
+        main_tip: bitcoin::BlockHash,
+    ) -> Result<Option<sidepot_core::Game>, Error> {
+        let rotxn = self.env.read_txn().map_err(EnvError::from)?;
+        Ok(
+            crate::game::preview(&rotxn, &self.archive, &self.state, main_tip)?
+                .map(|advance| advance.game),
+        )
+    }
+
     /// Sidepot: the game state at the tip, if any block has been connected.
     pub fn try_get_game(&self) -> Result<Option<sidepot_core::Game>, Error> {
         let rotxn = self.env.read_txn().map_err(EnvError::from)?;

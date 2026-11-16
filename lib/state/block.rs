@@ -154,8 +154,9 @@ pub fn prevalidate(
     if !body.coinbase.outputs.as_slice().ends_with(payouts) {
         return Err(Error::GamePayoutsMismatch);
     }
-    let claimable =
-        total_fees.checked_add(payouts_value).ok_or(AmountOverflowError)?;
+    let claimable = total_fees
+        .checked_add(payouts_value)
+        .ok_or(AmountOverflowError)?;
     if coinbase_value > claimable {
         return Err(Error::NotEnoughFees);
     }

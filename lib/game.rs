@@ -150,29 +150,34 @@ fn sats(value: &Value) -> Option<u64> {
 /// The bid of the block's BMM for this slot: the fee of the M8 transaction that commits to the h* the coinbase's
 /// M7 accepts and to the previous block (an M8 is only valid in the block after the one it names).
 fn bmm_bid(block: &Value, txs: &[Value]) -> Option<u64> {
-    let mut prev = const_hex::decode(block["previousblockhash"].as_str()?).ok()?;
+    let mut prev =
+        const_hex::decode(block["previousblockhash"].as_str()?).ok()?;
     prev.reverse();
-    let hstar = txs.first()?["vout"].as_array()?.iter().find_map(|o| {
-        match script(o)?.as_slice() {
-            [0x6a, 0x25, 0xd1, 0x61, 0x73, 0x68, slot, h @ ..]
-                if *slot == THIS_SIDECHAIN && h.len() == 32 =>
-            {
-                Some(h.to_vec())
-            }
-            _ => None,
-        }
-    })?;
+    let hstar =
+        txs.first()?["vout"].as_array()?.iter().find_map(
+            |o| match script(o)?.as_slice() {
+                [0x6a, 0x25, 0xd1, 0x61, 0x73, 0x68, slot, h @ ..]
+                    if *slot == THIS_SIDECHAIN && h.len() == 32 =>
+                {
+                    Some(h.to_vec())
+                }
+                _ => None,
+            },
+        )?;
     txs.iter().skip(1).find_map(|tx| {
         let commits =
-            tx["vout"].as_array()?.iter().any(|o| match script(o).as_deref() {
-                Some([0x6a, 0x44, 0x00, 0xbf, 0x00, slot, rest @ ..]) => {
-                    *slot == THIS_SIDECHAIN
-                        && rest.len() == 64
-                        && rest[..32] == hstar[..]
-                        && rest[32..] == prev[..]
-                }
-                _ => false,
-            });
+            tx["vout"]
+                .as_array()?
+                .iter()
+                .any(|o| match script(o).as_deref() {
+                    Some([0x6a, 0x44, 0x00, 0xbf, 0x00, slot, rest @ ..]) => {
+                        *slot == THIS_SIDECHAIN
+                            && rest.len() == 64
+                            && rest[..32] == hstar[..]
+                            && rest[32..] == prev[..]
+                    }
+                    _ => false,
+                });
         commits.then(|| sats(&tx["fee"])).flatten()
     })
 }
@@ -270,18 +275,72 @@ pub fn advance(
         }
         None => None,
     };
-    let mut game = parent_game.unwrap_or_else(|| {
+    let game = parent_game.unwrap_or_else(|| {
         Game::new(Params::default(), config.domain(), config.start_height)
     });
-    let mut payouts = Vec::new();
-    // L1 blocks to process, newest first: H - 2 is the parent of the block the BMM request names.
+    // H - 2 is the parent of the block the BMM request names.
     let named = archive.get_main_header_info(rotxn, &prev_main_hash)?;
+    if named.height == 0 {
+        return Ok(Some(Advance {
+            game,
+            payouts: Vec::new(),
+        }));
+    }
+    let last = (named.prev_block_hash, named.height - 1);
+    run(rotxn, archive, config, game, last, prev_side_hash).map(Some)
+}
+
+/// The game as it will stand once every L1 block up to `main_tip` has been processed: the tip's game run on
+/// over the L1 blocks no Sidepot block has processed yet. Not consensus state: an L1 reorg can still change it,
+/// and a block bonus it shows goes only to blocks that stay in the chain. For showing a move as soon as its L1
+/// block is mined, before the two blocks it takes to become part of a Sidepot block.
+///
+/// Returns `None` while the game is off.
+pub fn preview(
+    rotxn: &RoTxn,
+    archive: &Archive,
+    state: &State,
+    main_tip: bitcoin::BlockHash,
+) -> Result<Option<Advance>, AdvanceError> {
+    let Some(config) = config() else {
+        return Ok(None);
+    };
+    let game = state.try_get_game(rotxn)?.unwrap_or_else(|| {
+        Game::new(Params::default(), config.domain(), config.start_height)
+    });
+    let tip = archive.get_main_header_info(rotxn, &main_tip)?;
+    let side_tip = state.try_get_tip(rotxn)?;
+    run(
+        rotxn,
+        archive,
+        config,
+        game,
+        (main_tip, tip.height),
+        side_tip,
+    )
+    .map(Some)
+}
+
+/// Runs `game` over the L1 blocks after the last it processed, up to and including `last` (a block hash and its
+/// height), for a block whose parent is `prev_side_hash`.
+fn run(
+    rotxn: &RoTxn,
+    archive: &Archive,
+    config: &Config,
+    mut game: Game,
+    last: (bitcoin::BlockHash, u32),
+    prev_side_hash: Option<BlockHash>,
+) -> Result<Advance, AdvanceError> {
+    let mut payouts = Vec::new();
+    // L1 blocks to process, newest first.
     let mut pending = Vec::new();
-    let (mut hash, mut height) =
-        (named.prev_block_hash, named.height.saturating_sub(1));
-    while named.height > 0 && height > game.height {
+    let (mut hash, mut height) = last;
+    while height > game.height {
         pending.push((hash, height));
         hash = archive.get_main_header_info(rotxn, &hash)?.prev_block_hash;
+        if height == 0 {
+            break;
+        }
         height -= 1;
     }
     for (hash, height) in pending.into_iter().rev() {
@@ -319,7 +378,8 @@ pub fn advance(
             (Some(accepted), Some(parent)) => {
                 match archive.try_get_header(rotxn, accepted)? {
                     Some(header)
-                        if archive.is_descendant(rotxn, accepted, parent)? =>
+                        if archive
+                            .is_descendant(rotxn, accepted, parent)? =>
                     {
                         Some(header.producer)
                     }
@@ -333,5 +393,5 @@ pub fn advance(
             .map(|(producer, bid)| Bmm { producer, bid });
         game.on_bmm(bmm);
     }
-    Ok(Some(Advance { game, payouts }))
+    Ok(Advance { game, payouts })
 }

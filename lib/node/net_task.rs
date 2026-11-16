@@ -66,8 +66,9 @@ fn connect_tip_(
         header.prev_main_hash,
         header.prev_side_hash,
     )?;
-    let expected_game_hash =
-        game_advance.as_ref().map_or([0; 32], |advance| advance.game_hash());
+    let expected_game_hash = game_advance
+        .as_ref()
+        .map_or([0; 32], |advance| advance.game_hash());
     if header.game_hash != expected_game_hash {
         return Err(state::Error::GameHashMismatch.into());
     }

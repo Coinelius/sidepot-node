@@ -34,6 +34,52 @@ where
     custom_err_msg(format!("{error:#}"))
 }
 
+/// Sidepot: a game state as the RPC reports it.
+fn game_json(game: &sidepot_core::Game) -> serde_json::Value {
+    serde_json::json!({
+        "l1_height": game.height,
+        "clock": game.clock,
+        "round": game.round,
+        "deadline": game.deadline,
+        "price_sats": game.price,
+        "pot_sats": game.pot,
+        "bonus_pool_sats": game.streak_pool,
+        "streak": game.streak().map(|(producer, blocks)| serde_json::json!({
+            "producer": const_hex::encode(producer),
+            "blocks": blocks,
+        })),
+        "accounts": game.accounts.len(),
+    })
+}
+
+/// Sidepot: one game account as the RPC reports it, or null if the game has none for the key.
+fn account_json(
+    game: &sidepot_core::Game,
+    key: &[u8; 32],
+) -> serde_json::Value {
+    match game.accounts.get(key) {
+        Some(account) => serde_json::json!({
+            "balance_sats": game.balance(key),
+            "keys": account.keys,
+            "nonce": account.nonce,
+        }),
+        None => serde_json::Value::Null,
+    }
+}
+
+/// Sidepot: the game run on to the L1 tip the enforcer reports, for showing moves before a Sidepot block has
+/// processed them. `None` if it cannot be worked out just now (the tip's data has not been stored yet).
+async fn game_preview(app: &App) -> Option<sidepot_core::Game> {
+    let main_tip = app
+        .node
+        .with_cusf_mainchain(|cusf_mainchain| cusf_mainchain.clone())
+        .get_chain_tip()
+        .await
+        .ok()?
+        .block_hash;
+    app.node.preview_game(main_tip).ok().flatten()
+}
+
 #[derive(Clone)]
 #[repr(transparent)]
 pub struct RpcServerImpl<const ENABLE_PRIVATE_API: bool> {
@@ -423,24 +469,15 @@ impl<const ENABLE_PRIVATE_API: bool> rpc_api::node::RpcServer
     }
 
     async fn game_state(&self) -> RpcResult<serde_json::Value> {
+        let preview = game_preview(&self.app).await;
         let Some(game) = self.app.node.try_get_game().map_err(custom_err)?
         else {
             return Ok(serde_json::Value::Null);
         };
-        Ok(serde_json::json!({
-            "l1_height": game.height,
-            "clock": game.clock,
-            "round": game.round,
-            "deadline": game.deadline,
-            "price_sats": game.price,
-            "pot_sats": game.pot,
-            "bonus_pool_sats": game.streak_pool,
-            "streak": game.streak().map(|(producer, blocks)| serde_json::json!({
-                "producer": const_hex::encode(producer),
-                "blocks": blocks,
-            })),
-            "accounts": game.accounts.len(),
-        }))
+        let mut state = game_json(&game);
+        state["preview"] =
+            preview.as_ref().map_or(serde_json::Value::Null, game_json);
+        Ok(state)
     }
 
     async fn game_account(
@@ -450,19 +487,28 @@ impl<const ENABLE_PRIVATE_API: bool> rpc_api::node::RpcServer
         let key: [u8; 32] = const_hex::decode(&account_key)
             .ok()
             .and_then(|bytes| bytes.try_into().ok())
-            .ok_or_else(|| custom_err_msg("an account key is 64 hex characters"))?;
+            .ok_or_else(|| {
+                custom_err_msg("an account key is 64 hex characters")
+            })?;
+        let preview = game_preview(&self.app).await;
         let Some(game) = self.app.node.try_get_game().map_err(custom_err)?
         else {
             return Ok(serde_json::Value::Null);
         };
-        Ok(match game.accounts.get(&key) {
-            Some(account) => serde_json::json!({
-                "balance_sats": game.balance(&key),
-                "keys": account.keys,
-                "nonce": account.nonce,
-            }),
-            None => serde_json::Value::Null,
-        })
+        let confirmed = account_json(&game, &key);
+        let preview = preview
+            .as_ref()
+            .map_or(serde_json::Value::Null, |game| account_json(game, &key));
+        if confirmed.is_null() && preview.is_null() {
+            return Ok(serde_json::Value::Null);
+        }
+        let mut account = if confirmed.is_null() {
+            serde_json::json!({ "balance_sats": 0, "keys": 0, "nonce": 0 })
+        } else {
+            confirmed
+        };
+        account["preview"] = preview;
+        Ok(account)
     }
 
     async fn sidechain_wealth_sats(&self) -> RpcResult<u64> {
