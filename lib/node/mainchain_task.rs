@@ -245,8 +245,17 @@ where
         tracing::trace!(%block_hash, "storing ancestor headers/info");
         sync_progress.start_writing(tip_height, block_infos.len() as u32);
         task::block_in_place(|| {
+            // The game's view of each block, read from the L1 node before the write transaction opens.
+            let game_data = block_infos
+                .iter()
+                .map(|(header_info, _)| {
+                    Archive::fetch_main_game_data(header_info)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             let mut rwtxn = env.write_txn().map_err(EnvError::from)?;
-            for (header_info, block_info) in block_infos {
+            for ((header_info, block_info), game_data) in
+                block_infos.into_iter().zip(game_data)
+            {
                 let () =
                     archive.put_main_header_info(&mut rwtxn, &header_info)?;
                 let () = archive.put_main_block_info(
@@ -254,6 +263,13 @@ where
                     header_info.block_hash,
                     &block_info,
                 )?;
+                if let Some(game_data) = game_data {
+                    let () = archive.put_main_game_data(
+                        &mut rwtxn,
+                        header_info.block_hash,
+                        &game_data,
+                    )?;
+                }
                 sync_progress.wrote_headers(1);
             }
             rwtxn.commit().map_err(RwTxnError::from)?;
@@ -420,6 +436,15 @@ where
         event_tx: &mut UnboundedSender<Event>,
         event: proto::mainchain::Event,
     ) -> Result<(), error::HandleBlockEvent> {
+        // The game's view of a connected block, read from the L1 node before the write transaction opens.
+        let game_data = match &event {
+            proto::mainchain::Event::ConnectBlock { header_info, .. } => {
+                task::block_in_place(|| {
+                    Archive::fetch_main_game_data(header_info)
+                })?
+            }
+            _ => None,
+        };
         let mut rwtxn = env
             .write_txn()
             .map_err(|err| error::HandleBlockEvent::DbEnv(err.into()))?;
@@ -439,6 +464,13 @@ where
                     header_info.block_hash,
                     block_info,
                 )?;
+                if let Some(game_data) = &game_data {
+                    let () = archive.put_main_game_data(
+                        &mut rwtxn,
+                        header_info.block_hash,
+                        game_data,
+                    )?;
+                }
                 let bmm_commitment = 'bmm_commitment: {
                     let Some(side_block_hash) = block_info.bmm_commitment
                     else {

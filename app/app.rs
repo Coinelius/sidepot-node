@@ -506,12 +506,22 @@ impl App {
         } else {
             None
         };
+        // Sidepot: the game state this block must commit to and the cashouts its coinbase must pay.
+        let game_advance =
+            self.node.advance_game(prev_main_hash, prev_side_hash)?;
+        let game_hash = game_advance
+            .as_ref()
+            .map_or([0; 32], |advance| advance.game_hash());
+        let game_payouts =
+            game_advance.map_or_else(Vec::new, |advance| advance.payouts);
+        let producer =
+            thunder::game::config().map_or([0; 32], |config| config.producer);
         let (bribe, header, body, fees) = if prev_side_hash == tip_hash {
             const NUM_TRANSACTIONS: usize = 1000;
             let (txs, tx_fees) =
                 self.node.get_transactions(NUM_TRANSACTIONS)?;
             let coinbase = {
-                let outputs = match tx_fees {
+                let mut outputs = match tx_fees {
                     bitcoin::Amount::ZERO => Vec::new(),
                     _ => vec![types::Output {
                         // A template is built on every poll and mostly thrown
@@ -520,6 +530,7 @@ impl App {
                         content: types::OutputContent::Value(tx_fees),
                     }],
                 };
+                outputs.extend(game_payouts);
                 Coinbase {
                     memo: Vec::new(),
                     outputs: outputs.into(),
@@ -568,6 +579,8 @@ impl App {
                 roots,
                 prev_side_hash,
                 prev_main_hash,
+                producer,
+                game_hash,
             };
             let bribe = fee.unwrap_or_else(|| {
                 if tx_fees > bitcoin::Amount::ZERO {
@@ -578,7 +591,10 @@ impl App {
             });
             (bribe, header, body, tx_fees)
         } else {
-            let coinbase = Default::default();
+            let coinbase = Coinbase {
+                memo: Vec::new(),
+                outputs: game_payouts.into(),
+            };
             let txs: [FilledTransaction; 0] = [];
             let merkle_root =
                 types::Body::compute_merkle_root(&coinbase, &txs)?;
@@ -621,6 +637,8 @@ impl App {
                 roots,
                 prev_side_hash,
                 prev_main_hash,
+                producer,
+                game_hash,
             };
             let bribe = Self::EMPTY_BLOCK_BMM_BRIBE;
             (bribe, header, body, bitcoin::Amount::ZERO)

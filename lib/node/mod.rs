@@ -489,6 +489,29 @@ where
     }
 
     /// Get total sidechain wealth in Bitcoin
+    /// Sidepot: the game after a block built on `prev_side_hash` naming the L1 block `prev_main_hash` has
+    /// processed its L1 batches, with the cashouts its coinbase must pay. `None` while the game is off.
+    pub fn advance_game(
+        &self,
+        prev_main_hash: bitcoin::BlockHash,
+        prev_side_hash: Option<BlockHash>,
+    ) -> Result<Option<crate::game::Advance>, Error> {
+        let rotxn = self.env.read_txn().map_err(EnvError::from)?;
+        Ok(crate::game::advance(
+            &rotxn,
+            &self.archive,
+            &self.state,
+            prev_main_hash,
+            prev_side_hash,
+        )?)
+    }
+
+    /// Sidepot: the game state at the tip, if any block has been connected.
+    pub fn try_get_game(&self) -> Result<Option<sidepot_core::Game>, Error> {
+        let rotxn = self.env.read_txn().map_err(EnvError::from)?;
+        Ok(self.state.try_get_game(&rotxn)?)
+    }
+
     pub fn get_sidechain_wealth(&self) -> Result<bitcoin::Amount, Error> {
         let rotxn = self.env.read_txn().map_err(EnvError::from)?;
         Ok(self.state.sidechain_wealth(&rotxn)?)

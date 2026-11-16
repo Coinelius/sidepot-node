@@ -482,6 +482,13 @@ pub mod mainchain {
                     };
                 match Address::from_str(address_utf8) {
                     Ok(address) => address,
+                    // A deposit into a game account: no coin is made, so the address is unused.
+                    Err(_)
+                        if sidepot_core::deposit_player(address_utf8)
+                            .is_some() =>
+                    {
+                        Address::ALL_ZEROS
+                    }
                     Err(_) => {
                         tracing::warn!(
                             address_utf8,
@@ -524,6 +531,10 @@ pub mod mainchain {
         pub tx_index: u64,
         pub outpoint: OutPoint,
         pub output: Output,
+        /// Sidepot: set when the deposit's address is `spot:<x-only key>`. The value then goes to that game
+        /// account when the game processes the deposit's L1 block, and no coin is created.
+        #[serde(default)]
+        pub game_account: Option<[u8; 32]>,
     }
 
     impl TryFrom<generated::Deposit> for Deposit {
@@ -550,10 +561,18 @@ pub mod mainchain {
                     "output",
                 ));
             };
+            let game_account = output
+                .address
+                .as_ref()
+                .and_then(|address| address.hex.as_deref())
+                .and_then(|hex| const_hex::decode(hex).ok())
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+                .and_then(|address| sidepot_core::deposit_player(&address));
             Ok(Self {
                 tx_index: sequence_number,
                 outpoint: outpoint.try_into()?,
                 output: output.try_into()?,
+                game_account,
             })
         }
     }

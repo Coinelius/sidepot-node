@@ -129,6 +129,10 @@ pub enum InvalidHeader {
 pub enum Error {
     #[error("failed to verify authorization")]
     Authorization,
+    #[error("the header's game state hash does not match the game after this block's L1 batches")]
+    GameHashMismatch,
+    #[error("the coinbase does not end with exactly the game's cashout payouts")]
+    GamePayoutsMismatch,
     #[error(transparent)]
     AmountOverflow(#[from] AmountOverflowError),
     #[error(transparent)]

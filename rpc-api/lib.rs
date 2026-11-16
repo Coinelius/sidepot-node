@@ -414,6 +414,19 @@ pub mod node {
             &self,
         ) -> RpcResult<Option<WithdrawalBundle>>;
 
+        /// Sidepot: the game at the tip: L1 height processed, clock, round, deadline, price, pot, bonus pool
+        /// and current streak. Null before the first block.
+        #[method(name = "game_state")]
+        async fn game_state(&self) -> RpcResult<serde_json::Value>;
+
+        /// Sidepot: one game account, by its account key (64 hex characters): spendable balance in sats
+        /// (dividends included), keys held this round, and last accepted nonce. Null if it has none.
+        #[method(name = "game_account")]
+        async fn game_account(
+            &self,
+            account_key: String,
+        ) -> RpcResult<serde_json::Value>;
+
         /// Get total sidechain wealth
         #[method(name = "sidechain_wealth")]
         async fn sidechain_wealth_sats(&self) -> RpcResult<u64>;

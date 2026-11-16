@@ -7,7 +7,7 @@ use crate::{
     types::{
         AccumulatorDiff, AmountOverflowError, Body, FilledTransaction,
         GetAddress as _, GetValue as _, Header, InPoint, MerkleRoot, OutPoint,
-        OutPointKey, PointedOutput, SpentOutput, UtreexoNodeHash,
+        OutPointKey, Output, PointedOutput, SpentOutput, UtreexoNodeHash,
         authorization::{self, BatchVerificationContext},
     },
 };
@@ -20,6 +20,7 @@ pub fn prevalidate(
     rotxn: &RoTxn,
     header: &Header,
     body: &Body,
+    payouts: &[Output],
 ) -> Result<PrevalidatedBlock, Error> {
     let tip_hash = state.try_get_tip(rotxn)?;
     if header.prev_side_hash != tip_hash {
@@ -143,7 +144,19 @@ pub fn prevalidate(
             accumulator_diff.remove(utxo_hash);
         }
     }
-    if coinbase_value > total_fees {
+    // The game's cashouts are paid by the last coinbase outputs, exactly; the rest may claim the fees.
+    let mut payouts_value = bitcoin::Amount::ZERO;
+    for payout in payouts {
+        payouts_value = payouts_value
+            .checked_add(payout.get_value())
+            .ok_or(AmountOverflowError)?;
+    }
+    if !body.coinbase.outputs.as_slice().ends_with(payouts) {
+        return Err(Error::GamePayoutsMismatch);
+    }
+    let claimable =
+        total_fees.checked_add(payouts_value).ok_or(AmountOverflowError)?;
+    if coinbase_value > claimable {
         return Err(Error::NotEnoughFees);
     }
     let spent_utxos = filled_transactions
@@ -769,6 +782,8 @@ mod test {
             post_accumulator.apply_diff(diff)?;
         }
         let header = Header {
+            producer: [0; 32],
+            game_hash: [0; 32],
             merkle_root,
             prev_side_hash: None,
             prev_main_hash: bitcoin::BlockHash::from_byte_array([0u8; 32]),

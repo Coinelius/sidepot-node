@@ -14,8 +14,10 @@ tonic-prost-build = { workspace = true }
 
 [dependencies]
 async-lock = { workspace = true }
+base64 = "0.22"
 bincode = { workspace = true }
 bip32ish = { workspace = true }
+blake3 = { workspace = true }
 bitcoin = { workspace = true }
 borsh = { workspace = true }
 byteorder = { workspace = true }
@@ -43,6 +45,7 @@ semver = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
+sidepot-core = { path = "../../sidepot/crates/sidepot-core" }
 smallvec = { workspace = true, features = ["const_generics"] }
 sneed = { workspace = true, features = ["observe"] }
 thiserror = { workspace = true }
@@ -55,6 +58,7 @@ tonic = { workspace = true }
 tonic-prost = { workspace = true }
 tracing = { workspace = true }
 transitive = { workspace = true }
+ureq = { version = "2", features = ["json"] }
 url = { workspace = true }
 
 [dev-dependencies]

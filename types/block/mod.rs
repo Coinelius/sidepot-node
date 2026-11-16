@@ -33,6 +33,16 @@ pub struct Header {
     #[borsh(serialize_with = "util::borsh::serialize::utreexo_roots")]
     #[schema(value_type = Vec<schema::UtreexoNodeHash>)]
     pub roots: Vec<UtreexoNodeHash>,
+    /// Sidepot: the account key (BIP340 x-only) of this block's producer. A block bonus this block earns is
+    /// credited to that game account.
+    #[serde(default)]
+    #[schema(value_type = Vec<u8>)]
+    pub producer: [u8; 32],
+    /// Sidepot: hash of the game state after this block has processed its L1 batches. All zero while the game is
+    /// off.
+    #[serde(default)]
+    #[schema(value_type = Vec<u8>)]
+    pub game_hash: [u8; 32],
 }
 
 impl Header {
@@ -42,6 +52,8 @@ impl Header {
             prev_side_hash,
             prev_main_hash,
             roots: _,
+            producer: _,
+            game_hash: _,
         } = self;
         Coinbase::compute_txid(
             merkle_root,

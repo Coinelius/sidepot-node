@@ -57,11 +57,29 @@ fn connect_tip_(
     two_way_peg_data: &mainchain::TwoWayPegData,
 ) -> Result<(), Error> {
     let block_hash = header.hash();
-    let prevalidated = state.prevalidate_block(
+    // Sidepot: run the game over the L1 blocks this block must process. The header commits to the result and
+    // the coinbase pays its cashouts.
+    let game_advance = crate::game::advance(
+        rwtxn,
+        archive,
+        state,
+        header.prev_main_hash,
+        header.prev_side_hash,
+    )?;
+    let expected_game_hash =
+        game_advance.as_ref().map_or([0; 32], |advance| advance.game_hash());
+    if header.game_hash != expected_game_hash {
+        return Err(state::Error::GameHashMismatch.into());
+    }
+    let payouts = game_advance
+        .as_ref()
+        .map_or(&[][..], |advance| advance.payouts.as_slice());
+    let prevalidated = state.prevalidate_block_with_payouts(
         rwtxn,
         batch_verification_ctxt,
         header,
         body,
+        payouts,
     )?;
     if tracing::enabled!(tracing::Level::DEBUG) {
         let height = state.try_get_height(rwtxn)?;
@@ -81,6 +99,9 @@ fn connect_tip_(
         )?;
     }
     let () = state.connect_two_way_peg_data(rwtxn, two_way_peg_data)?;
+    if let Some(advance) = &game_advance {
+        let () = state.put_game(rwtxn, &advance.game)?;
+    }
     let accumulator = state.get_accumulator(rwtxn)?;
     // TODO: are these needed?
     {
@@ -1836,6 +1857,8 @@ mod test {
             }
             let main_header = archive::test::main_header_info(0);
             let header = Header {
+                producer: [0; 32],
+                game_hash: [0; 32],
                 merkle_root: MerkleRoot::from([7; 32]),
                 prev_side_hash: None,
                 prev_main_hash: main_header.prev_block_hash,

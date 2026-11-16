@@ -235,6 +235,37 @@ pub(super) struct Cli {
     /// Data directory for storing wallet data
     #[arg(long)]
     wallet_dir: Option<PathBuf>,
+    /// Sidepot: the first L1 block of the game.
+    #[arg(default_value_t = 984_960, long)]
+    game_start_height: u32,
+    /// Sidepot: hash of the L1 block that mined the slot proposal, as the L1 node prints it. Entries are signed
+    /// for it. The default is eCash mainnet block 982,723.
+    #[arg(
+        default_value = "0000000000000000019340956c9c00140207ee2ad5c683894a51bbe072bbbf33",
+        long
+    )]
+    game_anchor: bitcoin::BlockHash,
+    /// Sidepot: JSON-RPC URL of the L1 node the enforcer runs against. The game reads every L1 block from it,
+    /// so it must keep block undo data (not pruned).
+    #[arg(default_value = "http://127.0.0.1:8332", long)]
+    l1_rpc_url: String,
+    /// Sidepot: the L1 node's cookie file.
+    #[arg(long)]
+    l1_rpc_cookie: Option<PathBuf>,
+    /// Sidepot: `user:password` for the L1 node's RPC, if it has no cookie file.
+    #[arg(long)]
+    l1_rpc_userpass: Option<String>,
+    /// Sidepot: the account key (64 hex characters, BIP340 x-only) that receives the block bonuses of blocks
+    /// this node produces. Without it, bonuses go to an account nobody can cash out.
+    #[arg(long, value_parser = parse_account_key)]
+    producer_key: Option<[u8; 32]>,
+}
+
+fn parse_account_key(s: &str) -> Result<[u8; 32], String> {
+    let bytes = const_hex::decode(s).map_err(|err| err.to_string())?;
+    bytes
+        .try_into()
+        .map_err(|_| "an account key is 32 bytes".to_owned())
 }
 
 impl Cli {
@@ -261,6 +292,25 @@ impl Cli {
             saturating_pred_level(self.log_level)
         };
         let wallet_dir = self.wallet_dir.unwrap_or_else(|| datadir.clone());
+        if self.producer_key.is_none() {
+            tracing::warn!(
+                "no --producer-key: block bonuses of blocks this node produces cannot be cashed out"
+            );
+        }
+        let game_config = thunder::game::Config {
+            start_height: self.game_start_height,
+            anchor: {
+                use bitcoin::hashes::Hash as _;
+                self.game_anchor.to_byte_array()
+            },
+            l1_rpc_url: self.l1_rpc_url,
+            l1_rpc_cookie: self.l1_rpc_cookie,
+            l1_rpc_userpass: self.l1_rpc_userpass,
+            producer: self.producer_key.unwrap_or([0; 32]),
+        };
+        if thunder::game::set_config(game_config).is_err() {
+            anyhow::bail!("the game config was already set");
+        }
         Ok(Config {
             add_peers: HashSet::from_iter(self.add_peers),
             datadir,

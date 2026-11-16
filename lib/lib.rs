@@ -1,4 +1,5 @@
 pub mod archive;
+pub mod game;
 pub mod mempool;
 pub mod miner;
 pub mod net;

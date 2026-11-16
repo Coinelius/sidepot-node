@@ -61,6 +61,14 @@ pub enum Error {
     NoHeight(BlockHash),
     #[error("unknown mainchain block hash: {0}")]
     NoMainBlockHash(bitcoin::BlockHash),
+    #[error("no L1 game data for block hash {0}")]
+    NoMainGameData(bitcoin::BlockHash),
+    #[error("cannot read L1 block {block_hash} for the game")]
+    FetchMainGameData {
+        block_hash: bitcoin::BlockHash,
+        #[source]
+        source: crate::game::FetchError,
+    },
     #[error("no mainchain block info for block hash {0}")]
     NoMainBlockInfo(bitcoin::BlockHash),
     #[error("no mainchain header info for block hash {0}")]

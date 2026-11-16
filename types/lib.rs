@@ -41,7 +41,7 @@ pub use transaction::{
 mod util;
 pub mod wallet;
 
-pub const THIS_SIDECHAIN: u8 = 9;
+pub const THIS_SIDECHAIN: u8 = 88;
 
 pub type UtreexoProof = rustreexo::accumulator::proof::Proof<UtreexoNodeHash>;
 

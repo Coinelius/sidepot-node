@@ -10,6 +10,7 @@ use sneed::{
     DatabaseUnique, DbError, EnvError, RoTxn, RwTxn, RwTxnError, UnitKey,
 };
 
+use crate::game::MainGameData;
 use crate::types::{
     Accumulator, BlockHash, BmmResult, Body, Header, Tip, Txid, VERSION,
     Version,
@@ -76,6 +77,12 @@ pub struct Archive {
         SerdeBincode<bitcoin::BlockHash>,
         SerdeBincode<mainchain::BlockInfo>,
     >,
+    /// What the game reads from each L1 block at or above its start height (entries, transaction count, BMM
+    /// bid). Written together with the block's header info.
+    main_game_data: DatabaseUnique<
+        SerdeBincode<bitcoin::BlockHash>,
+        SerdeBincode<MainGameData>,
+    >,
     /// Mainchain header infos.
     /// All ancestors of any header should always be present.
     main_header_infos: DatabaseUnique<
@@ -110,7 +117,7 @@ pub struct Archive {
 }
 
 impl Archive {
-    pub const NUM_DBS: u32 = SideTips::NUM_DBS + 16;
+    pub const NUM_DBS: u32 = SideTips::NUM_DBS + 17;
 
     pub fn new<Tls>(env: &sneed::Env<Tls>) -> Result<Self, Error> {
         let mut rwtxn = env.write_txn().map_err(EnvError::from)?;
@@ -167,6 +174,9 @@ impl Archive {
         let main_block_infos =
             DatabaseUnique::create(env, &mut rwtxn, "main_block_infos")
                 .map_err(EnvError::from)?;
+        let main_game_data =
+            DatabaseUnique::create(env, &mut rwtxn, "main_game_data")
+                .map_err(EnvError::from)?;
         let main_header_infos =
             DatabaseUnique::create(env, &mut rwtxn, "main_header_infos")
                 .map_err(EnvError::from)?;
@@ -215,6 +225,7 @@ impl Archive {
             invalid_blocks,
             main_block_infos,
             main_block_hash_to_height,
+            main_game_data,
             main_header_infos,
             main_successors,
             side_tips,
@@ -382,6 +393,57 @@ impl Archive {
     ) -> Result<mainchain::BlockInfo, Error> {
         self.try_get_main_block_info(rotxn, main_hash)?
             .ok_or_else(|| Error::NoMainBlockInfo(*main_hash))
+    }
+
+    /// The game's data for an L1 block: present for every stored block at or above the game's start height.
+    pub fn try_get_main_game_data(
+        &self,
+        rotxn: &RoTxn,
+        main_hash: &bitcoin::BlockHash,
+    ) -> Result<Option<MainGameData>, Error> {
+        let data = self
+            .main_game_data
+            .try_get(rotxn, main_hash)
+            .map_err(DbError::from)?;
+        Ok(data)
+    }
+
+    pub fn get_main_game_data(
+        &self,
+        rotxn: &RoTxn,
+        main_hash: &bitcoin::BlockHash,
+    ) -> Result<MainGameData, Error> {
+        self.try_get_main_game_data(rotxn, main_hash)?
+            .ok_or_else(|| Error::NoMainGameData(*main_hash))
+    }
+
+    pub fn put_main_game_data(
+        &self,
+        rwtxn: &mut RwTxn,
+        main_hash: bitcoin::BlockHash,
+        data: &MainGameData,
+    ) -> Result<(), Error> {
+        self.main_game_data
+            .put(rwtxn, &main_hash, data)
+            .map_err(DbError::from)?;
+        Ok(())
+    }
+
+    /// Reads the game's data for an L1 block from the L1 node, if the game is on and the block is at or above
+    /// its start height. Blocking.
+    pub fn fetch_main_game_data(
+        header_info: &mainchain::BlockHeaderInfo,
+    ) -> Result<Option<MainGameData>, Error> {
+        let Some(config) = crate::game::config() else {
+            return Ok(None);
+        };
+        if header_info.height < config.start_height {
+            return Ok(None);
+        }
+        let block_hash = header_info.block_hash;
+        crate::game::fetch(&block_hash)
+            .map(Some)
+            .map_err(|source| Error::FetchMainGameData { block_hash, source })
     }
 
     pub fn try_get_main_height(
@@ -1809,6 +1871,8 @@ pub(crate) mod test {
         let mut block_hashes = Vec::new();
         for n in 0..3u8 {
             let header = Header {
+                producer: [0; 32],
+                game_hash: [0; 32],
                 merkle_root: MerkleRoot::from([n; 32]),
                 prev_side_hash,
                 prev_main_hash: main_block_hash,

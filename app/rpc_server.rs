@@ -422,6 +422,49 @@ impl<const ENABLE_PRIVATE_API: bool> rpc_api::node::RpcServer
             .map_err(custom_err)
     }
 
+    async fn game_state(&self) -> RpcResult<serde_json::Value> {
+        let Some(game) = self.app.node.try_get_game().map_err(custom_err)?
+        else {
+            return Ok(serde_json::Value::Null);
+        };
+        Ok(serde_json::json!({
+            "l1_height": game.height,
+            "clock": game.clock,
+            "round": game.round,
+            "deadline": game.deadline,
+            "price_sats": game.price,
+            "pot_sats": game.pot,
+            "bonus_pool_sats": game.streak_pool,
+            "streak": game.streak().map(|(producer, blocks)| serde_json::json!({
+                "producer": const_hex::encode(producer),
+                "blocks": blocks,
+            })),
+            "accounts": game.accounts.len(),
+        }))
+    }
+
+    async fn game_account(
+        &self,
+        account_key: String,
+    ) -> RpcResult<serde_json::Value> {
+        let key: [u8; 32] = const_hex::decode(&account_key)
+            .ok()
+            .and_then(|bytes| bytes.try_into().ok())
+            .ok_or_else(|| custom_err_msg("an account key is 64 hex characters"))?;
+        let Some(game) = self.app.node.try_get_game().map_err(custom_err)?
+        else {
+            return Ok(serde_json::Value::Null);
+        };
+        Ok(match game.accounts.get(&key) {
+            Some(account) => serde_json::json!({
+                "balance_sats": game.balance(&key),
+                "keys": account.keys,
+                "nonce": account.nonce,
+            }),
+            None => serde_json::Value::Null,
+        })
+    }
+
     async fn sidechain_wealth_sats(&self) -> RpcResult<u64> {
         let sidechain_wealth =
             self.app.node.get_sidechain_wealth().map_err(custom_err)?;

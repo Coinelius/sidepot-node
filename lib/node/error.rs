@@ -205,3 +205,21 @@ impl From<state::Error> for Error {
         Self::State(Box::new(err))
     }
 }
+
+impl From<crate::game::AdvanceError> for Error {
+    fn from(err: crate::game::AdvanceError) -> Self {
+        match err {
+            crate::game::AdvanceError::Archive(err) => err.into(),
+            crate::game::AdvanceError::State(err) => err.into(),
+        }
+    }
+}
+
+impl From<crate::game::AdvanceError> for net_task::Error {
+    fn from(err: crate::game::AdvanceError) -> Self {
+        match err {
+            crate::game::AdvanceError::Archive(err) => err.into(),
+            crate::game::AdvanceError::State(err) => err.into(),
+        }
+    }
+}

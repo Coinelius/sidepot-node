@@ -85,11 +85,15 @@ pub struct State {
         SerdeBincode<(bitcoin::BlockHash, u32)>,
     >,
     pub utreexo_accumulator: DatabaseUnique<UnitKey, SerdeBincode<Accumulator>>,
+    /// Sidepot: the game state after the block at each height. The last entry is the current game; disconnecting
+    /// a block deletes its entry, which restores the game as its parent left it.
+    pub game_snapshots:
+        DatabaseUnique<SerdeBincode<u32>, SerdeBincode<sidepot_core::Game>>,
     _version: DatabaseUnique<UnitKey, SerdeBincode<Version>>,
 }
 
 impl State {
-    pub const NUM_DBS: u32 = 12;
+    pub const NUM_DBS: u32 = 13;
 
     pub fn new<Tls>(env: &sneed::Env<Tls>) -> Result<Self, Error> {
         let mut rwtxn = env.write_txn().map_err(EnvError::from)?;
@@ -131,6 +135,9 @@ impl State {
         let utreexo_accumulator =
             DatabaseUnique::create(env, &mut rwtxn, "utreexo_accumulator")
                 .map_err(EnvError::from)?;
+        let game_snapshots =
+            DatabaseUnique::create(env, &mut rwtxn, "game_snapshots")
+                .map_err(EnvError::from)?;
         let version = DatabaseUnique::create(env, &mut rwtxn, "state_version")
             .map_err(EnvError::from)?;
         match version.try_get(&rwtxn, &())? {
@@ -163,6 +170,7 @@ impl State {
             deposit_blocks,
             withdrawal_bundle_event_blocks,
             utreexo_accumulator,
+            game_snapshots,
             _version: version,
         })
     }
@@ -596,7 +604,68 @@ impl State {
         header: &Header,
         body: &Body,
     ) -> Result<PrevalidatedBlock, Error> {
-        block::prevalidate(batch_verification_ctxt, self, rotxn, header, body)
+        self.prevalidate_block_with_payouts(
+            rotxn,
+            batch_verification_ctxt,
+            header,
+            body,
+            &[],
+        )
+    }
+
+    /// As [`Self::prevalidate_block`], for a block that must pay `payouts` (the game's cashouts) as the last
+    /// outputs of its coinbase, on top of the fees it may claim.
+    pub fn prevalidate_block_with_payouts(
+        &self,
+        rotxn: &RoTxn,
+        batch_verification_ctxt: &BatchVerificationContext,
+        header: &Header,
+        body: &Body,
+        payouts: &[Output],
+    ) -> Result<PrevalidatedBlock, Error> {
+        block::prevalidate(
+            batch_verification_ctxt,
+            self,
+            rotxn,
+            header,
+            body,
+            payouts,
+        )
+    }
+
+    /// The current game state: the one the tip left, if any block has stored one.
+    pub fn try_get_game(
+        &self,
+        rotxn: &RoTxn,
+    ) -> Result<Option<sidepot_core::Game>, Error> {
+        let last = self.game_snapshots.last(rotxn).map_err(DbError::from)?;
+        Ok(last.map(|(_height, game)| game))
+    }
+
+    /// The game state the block at `height` of the active chain left.
+    pub fn try_get_game_at(
+        &self,
+        rotxn: &RoTxn,
+        height: u32,
+    ) -> Result<Option<sidepot_core::Game>, Error> {
+        let game = self
+            .game_snapshots
+            .try_get(rotxn, &height)
+            .map_err(DbError::from)?;
+        Ok(game)
+    }
+
+    /// Stores the game state the tip leaves.
+    pub fn put_game(
+        &self,
+        rwtxn: &mut RwTxn,
+        game: &sidepot_core::Game,
+    ) -> Result<(), Error> {
+        let height = self.try_get_height(rwtxn)?.ok_or(Error::NoTip)?;
+        self.game_snapshots
+            .put(rwtxn, &height, game)
+            .map_err(DbError::from)?;
+        Ok(())
     }
 
     /// Connect a block using prevalidated data to avoid recomputation.
@@ -635,6 +704,12 @@ impl State {
         header: &Header,
         body: &Body,
     ) -> Result<(), Error> {
+        // Dropping the tip's game snapshot restores the game its parent left.
+        if let Some(height) = self.try_get_height(rwtxn)? {
+            self.game_snapshots
+                .delete(rwtxn, &height)
+                .map_err(DbError::from)?;
+        }
         block::disconnect_tip(self, rwtxn, header, body)
     }
 

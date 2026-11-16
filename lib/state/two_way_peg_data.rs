@@ -539,6 +539,8 @@ fn connect_event(
     event: &BlockEvent,
 ) -> Result<(), Error> {
     match event {
+        // A deposit into a game account is credited by the game, not turned into a coin.
+        BlockEvent::Deposit(deposit) if deposit.game_account.is_some() => (),
         BlockEvent::Deposit(deposit) => {
             let outpoint = OutPoint::Deposit(deposit.outpoint);
             let output = &deposit.output;
@@ -990,6 +992,7 @@ fn disconnect_event(
     event: &BlockEvent,
 ) -> Result<(), Error> {
     match event {
+        BlockEvent::Deposit(deposit) if deposit.game_account.is_some() => (),
         BlockEvent::Deposit(deposit) => {
             let outpoint = OutPoint::Deposit(deposit.outpoint);
             let output = deposit.output.clone();
@@ -1419,6 +1422,8 @@ mod test {
         let main1 = bitcoin::BlockHash::from_byte_array([11; 32]);
 
         let genesis = Header {
+            producer: [0; 32],
+            game_hash: [0; 32],
             merkle_root,
             prev_side_hash: None,
             prev_main_hash: main0,
@@ -1440,6 +1445,8 @@ mod test {
         }
 
         let block1 = Header {
+            producer: [0; 32],
+            game_hash: [0; 32],
             merkle_root,
             prev_side_hash: Some(genesis.hash()),
             prev_main_hash: main1,
@@ -1458,6 +1465,7 @@ mod test {
                 BlockInfo {
                     bmm_commitment: None,
                     events: vec![BlockEvent::Deposit(Deposit {
+                        game_account: None,
                         tx_index: 0,
                         outpoint: deposit_outpoint,
                         output: value_output(Address::ALL_ZEROS, 1000),
@@ -1504,6 +1512,7 @@ mod test {
     fn disconnect_two_deposit_blocks_restores_state() -> anyhow::Result<()> {
         fn deposit_block(salt: u8) -> (bitcoin::BlockHash, BlockInfo) {
             let dep = Deposit {
+                game_account: None,
                 tx_index: 0,
                 outpoint: bitcoin::OutPoint {
                     txid: bitcoin::Txid::from_byte_array([salt; 32]),

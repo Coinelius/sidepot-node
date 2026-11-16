@@ -157,6 +157,13 @@ pub enum Command {
     SetSeedFromMnemonic { mnemonic: String },
     /// Get total sidechain wealth
     SidechainWealth,
+    /// Sidepot: the game at the tip
+    GameState,
+    /// Sidepot: one game account
+    GameAccount {
+        /// The account key, 64 hex characters
+        account_key: String,
+    },
     /// Sign a transaction, and optionally broadcast it.
     SignTransaction {
         #[arg(value_parser = JsonParser::<thunder_types::Transaction>::parse)]
@@ -390,6 +397,14 @@ where
         Command::SetSeedFromMnemonic { mnemonic } => {
             let () = rpc_client.set_seed_from_mnemonic(mnemonic).await?;
             String::default()
+        }
+        Command::GameState => {
+            let state = rpc_client.game_state().await?;
+            serde_json::to_string_pretty(&state)?
+        }
+        Command::GameAccount { account_key } => {
+            let account = rpc_client.game_account(account_key).await?;
+            serde_json::to_string_pretty(&account)?
         }
         Command::SidechainWealth => {
             let sidechain_wealth = rpc_client.sidechain_wealth_sats().await?;
