@@ -62,6 +62,13 @@ impl Config {
     }
 }
 
+/// The game before any L1 block has been processed, if the game is on.
+pub fn initial() -> Option<Game> {
+    config().map(|config| {
+        Game::new(Params::default(), config.domain(), config.start_height)
+    })
+}
+
 /// What the game reads from one L1 block.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct MainGameData {

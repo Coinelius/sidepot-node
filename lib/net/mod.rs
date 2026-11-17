@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, hash_map},
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{IpAddr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
@@ -25,7 +25,7 @@ use crate::{
     types::{
         AuthorizedTransaction, Network, VERSION, Version,
         net::{
-            DEFAULT_PORT, Peer, PeerAddress, PeerConnectionStatus,
+            Peer, PeerAddress, PeerConnectionStatus,
             ResolvedPeerAddress,
         },
     },
@@ -166,40 +166,6 @@ pub fn make_server_endpoint(
 pub type PeerInfoRx =
     mpsc::UnboundedReceiver<(SocketAddr, Option<PeerConnectionInfo>)>;
 
-const BETANET_SEED_PEER_ADDRS: &[PeerAddress<&'static str>] = {
-    const ECASH_EU_COM: PeerAddress<&'static str> = PeerAddress {
-        host: url::Host::Domain("seed.beta.ecash.eu.com"),
-        port: DEFAULT_PORT,
-    };
-    &[ECASH_EU_COM]
-};
-
-const SIGNET_SEED_PEER_ADDRS: &[PeerAddress<&'static str>] = {
-    const SIGNET_MINING_SERVER: PeerAddress<&'static str> = PeerAddress {
-        host: url::Host::Ipv4(Ipv4Addr::new(172, 105, 148, 135)),
-        port: DEFAULT_PORT,
-    };
-    const BIP300_XYZ: PeerAddress<&'static str> = PeerAddress {
-        host: url::Host::Domain("thunder.bip300.xyz"),
-        port: DEFAULT_PORT,
-    };
-    &[SIGNET_MINING_SERVER, BIP300_XYZ]
-};
-
-const FORKNET_SEED_PEER_ADDRS: &[PeerAddress<&'static str>] = {
-    const BIP300_XYZ: PeerAddress<&'static str> = PeerAddress {
-        host: url::Host::Domain("explorer.bip300.xyz"),
-        port: DEFAULT_PORT,
-    };
-    &[
-        BIP300_XYZ,
-        PeerAddress {
-            host: url::Host::Ipv4(Ipv4Addr::new(157, 180, 8, 224)),
-            port: DEFAULT_PORT,
-        },
-    ]
-};
-
 /// Add every seed address the network names that the database does not hold.
 /// A datadir made before a seed existed would otherwise never learn it.
 fn ensure_seed_peers(
@@ -220,10 +186,9 @@ const fn seed_peer_addrs(
     network: Network,
 ) -> &'static [PeerAddress<&'static str>] {
     match network {
-        Network::Betanet => BETANET_SEED_PEER_ADDRS,
-        Network::Forknet => FORKNET_SEED_PEER_ADDRS,
+        // No seed nodes yet: peers are given with `--add-peer` or `connect-peer`.
+        Network::Mainnet => &[],
         Network::Regtest => &[],
-        Network::Signet => SIGNET_SEED_PEER_ADDRS,
     }
 }
 
@@ -1068,7 +1033,7 @@ mod test {
     #[test]
     fn seeds_reach_an_existing_database() -> anyhow::Result<()> {
         let (_temp_dir, env) = temp_env("seed-peers")?;
-        let network = Network::Betanet;
+        let network = Network::Mainnet;
         let known_peers = {
             let mut rwtxn = env.write_txn()?;
             let known_peers: DatabaseUnique<SerdeBincode<PeerAddress>, Unit> =

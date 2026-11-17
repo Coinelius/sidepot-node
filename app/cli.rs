@@ -97,7 +97,7 @@ static DEFAULT_DATA_DIR: LazyLock<Option<PathBuf>> =
             tracing::warn!("Failed to resolve default data dir");
             None
         }
-        Some(data_dir) => Some(data_dir.join("thunder")),
+        Some(data_dir) => Some(data_dir.join("sidepot")),
     });
 
 const DEFAULT_NET_ADDR: SocketAddr =

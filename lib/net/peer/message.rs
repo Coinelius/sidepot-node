@@ -15,24 +15,13 @@ pub const MAGIC_BYTES_LEN: usize = 4;
 
 pub type MagicBytes = [u8; MAGIC_BYTES_LEN];
 
-// First 4 bytes are the US-TTY (LSB Left) Baudot–Murray code for "THNDR".
-// The least significant bits of the 4th byte encode the network
-// identifier.
+// Sidepot's own magic, so its nodes and Thunder's never read each other's messages: ASCII "SPOT" on mainnet,
+// "SPOt" on regtest.
 pub const fn magic_bytes(network: Network) -> MagicBytes {
-    const PREFIX: [u8; 4] =
-        [0b1000_0101, 0b0001_1000, 0b1001_0101, 0b0000_0000];
-    const fn network_identifier(network: Network) -> u8 {
-        match network {
-            Network::Regtest => 0b0000_0000,
-            Network::Signet => 0b0000_0001,
-            Network::Forknet => 0b0000_0010,
-            // Network::Alphanet => 0b0000_0011,
-            Network::Betanet => 0b0000_0100,
-        }
+    match network {
+        Network::Mainnet => *b"SPOT",
+        Network::Regtest => *b"SPOt",
     }
-    let mut res = PREFIX;
-    *res.last_mut().unwrap() |= network_identifier(network);
-    res
 }
 
 #[derive(BorshSerialize, Clone, Debug, Deserialize, Serialize)]

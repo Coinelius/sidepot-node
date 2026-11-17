@@ -77,6 +77,16 @@ async fn game_preview(app: &App) -> Option<sidepot_core::Game> {
         .await
         .ok()?
         .block_hash;
+    // A node that neither produces blocks nor has peers learns of new L1 blocks only here. Stored blocks cost
+    // nothing to ask for again.
+    if !app
+        .node
+        .request_mainchain_ancestor_infos(main_tip)
+        .await
+        .ok()?
+    {
+        return None;
+    }
     app.node.preview_game(main_tip).ok().flatten()
 }
 
@@ -470,11 +480,21 @@ impl<const ENABLE_PRIVATE_API: bool> rpc_api::node::RpcServer
 
     async fn game_state(&self) -> RpcResult<serde_json::Value> {
         let preview = game_preview(&self.app).await;
-        let Some(game) = self.app.node.try_get_game().map_err(custom_err)?
+        // Before the first Sidepot block there is no stored game: report the opening one.
+        let Some(game) = self
+            .app
+            .node
+            .try_get_game()
+            .map_err(custom_err)?
+            .or_else(thunder::game::initial)
         else {
             return Ok(serde_json::Value::Null);
         };
         let mut state = game_json(&game);
+        state["start_height"] = thunder::game::config()
+            .map_or(serde_json::Value::Null, |config| {
+                config.start_height.into()
+            });
         state["preview"] =
             preview.as_ref().map_or(serde_json::Value::Null, game_json);
         Ok(state)
@@ -491,7 +511,12 @@ impl<const ENABLE_PRIVATE_API: bool> rpc_api::node::RpcServer
                 custom_err_msg("an account key is 64 hex characters")
             })?;
         let preview = game_preview(&self.app).await;
-        let Some(game) = self.app.node.try_get_game().map_err(custom_err)?
+        let Some(game) = self
+            .app
+            .node
+            .try_get_game()
+            .map_err(custom_err)?
+            .or_else(thunder::game::initial)
         else {
             return Ok(serde_json::Value::Null);
         };

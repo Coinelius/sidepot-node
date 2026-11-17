@@ -640,11 +640,10 @@ pub struct Tip {
     strum(serialize_all = "lowercase")
 )]
 pub enum Network {
+    /// eCash mainnet, where Sidepot is slot 88.
     #[default]
-    Betanet,
-    Forknet,
+    Mainnet,
     Regtest,
-    Signet,
 }
 
 /// Semver-compatible version
