@@ -43,6 +43,7 @@ sidepot-node --headless \
 | `--mainchain-grpc-url` | the enforcer's gRPC address | |
 | `--l1-rpc-url` | the eCash node's JSON-RPC address | |
 | `--l1-rpc-cookie` / `--l1-rpc-userpass` | how to log in to it: its cookie file, or `user:password` | |
+| `--l1-esplora-url` | an Esplora server to read eCash blocks from instead, for a node on a remote enforcer with no eCash node beside it | none |
 | `--game-start-height` | the game's first eCash block | 984960 |
 | `--game-anchor` | hash of the eCash block that mined the slot's proposal | mainnet block 982,723 |
 | `--producer-key` | the game account (64 hex characters) that earns the block bonus of blocks this node produces | the node's own game account |

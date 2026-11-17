@@ -90,11 +90,16 @@ impl GameView {
     }
 }
 
-/// A move this node posted.
+/// A move this node posted, or signed for something else to post.
 #[derive(Clone, Debug, Serialize)]
 pub struct Move {
-    /// The L1 transaction that carries the entry.
-    pub txid: bitcoin::Txid,
+    /// The L1 transaction that carries the entry, if this node posted it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub txid: Option<bitcoin::Txid>,
+    /// The signed entry in hex, if it was only signed: the data of one `OP_RETURN` output (a single push) of
+    /// an L1 transaction that whoever asked must send.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
     pub round: u32,
     pub nonce: u64,
     /// Last tick of the game clock at which the entry counts.
@@ -163,6 +168,20 @@ impl App {
         nonce
     }
 
+    /// Posts the entry with the enforcer's wallet, or hands its bytes back in hex.
+    async fn post_or_keep(
+        &self,
+        entry: &Entry,
+        post: Option<Option<u64>>,
+    ) -> Result<(Option<bitcoin::Txid>, Option<String>), Error> {
+        match post {
+            Some(fee_sats) => {
+                Ok((Some(self.post_entry(entry, fee_sats).await?), None))
+            }
+            None => Ok((None, Some(const_hex::encode(entry.encode())))),
+        }
+    }
+
     async fn post_entry(
         &self,
         entry: &Entry,
@@ -189,10 +208,30 @@ impl App {
         max_price_sats: Option<u64>,
         fee_sats: Option<u64>,
     ) -> Result<Move, Error> {
+        self.buy(keys, max_price_sats, Some(fee_sats)).await
+    }
+
+    /// Signs the same buy without posting it, for a wallet elsewhere to carry (a node on a remote enforcer has
+    /// no L1 wallet of its own).
+    pub async fn game_sign_buy(
+        &self,
+        keys: u16,
+        max_price_sats: Option<u64>,
+    ) -> Result<Move, Error> {
+        self.buy(keys, max_price_sats, None).await
+    }
+
+    /// `post` is the L1 fee to post the entry with (`Some(None)`: the default fee), or `None` to only sign.
+    async fn buy(
+        &self,
+        keys: u16,
+        max_price_sats: Option<u64>,
+        post: Option<Option<u64>>,
+    ) -> Result<Move, Error> {
         if !(1..=1000).contains(&keys) {
             return Err(game_err("a buy is for 1 to 1000 keys"));
         }
-        if self.game_wallet.is_none() {
+        if post.is_some() && self.game_wallet.is_none() {
             return Err(Error::NoCusfMainchainWalletClient);
         }
         let keypair = self.wallet.game_keypair()?;
@@ -228,9 +267,10 @@ impl App {
         let entry = Entry::buy(
             &keypair, &domain, game.round, keys, max_price, nonce, expires,
         );
-        let txid = self.post_entry(&entry, fee_sats).await?;
+        let (txid, signed) = self.post_or_keep(&entry, post).await?;
         Ok(Move {
             txid,
+            entry: signed,
             round: game.round,
             nonce,
             expires,
@@ -249,7 +289,25 @@ impl App {
         dest: Option<Address>,
         fee_sats: Option<u64>,
     ) -> Result<Move, Error> {
-        if self.game_wallet.is_none() {
+        self.cashout(amount_sats, dest, Some(fee_sats)).await
+    }
+
+    /// Signs the same cashout without posting it.
+    pub async fn game_sign_cashout(
+        &self,
+        amount_sats: u64,
+        dest: Option<Address>,
+    ) -> Result<Move, Error> {
+        self.cashout(amount_sats, dest, None).await
+    }
+
+    async fn cashout(
+        &self,
+        amount_sats: u64,
+        dest: Option<Address>,
+        post: Option<Option<u64>>,
+    ) -> Result<Move, Error> {
+        if post.is_some() && self.game_wallet.is_none() {
             return Err(Error::NoCusfMainchainWalletClient);
         }
         let keypair = self.wallet.game_keypair()?;
@@ -278,9 +336,10 @@ impl App {
             nonce,
             expires,
         );
-        let txid = self.post_entry(&entry, fee_sats).await?;
+        let (txid, signed) = self.post_or_keep(&entry, post).await?;
         Ok(Move {
             txid,
+            entry: signed,
             round: view.preview.round,
             nonce,
             expires,

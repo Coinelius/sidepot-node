@@ -274,7 +274,7 @@ impl Sidepot {
                     app.game_buy(keys, None, None).await.map_err(err_text)?;
                 Ok(format!(
                     "Sent in eCash transaction {}. It counts once a block includes it.",
-                    sent.txid
+                    sent.txid.map(|txid| txid.to_string()).unwrap_or_default()
                 ))
             });
         }
@@ -369,7 +369,7 @@ impl Sidepot {
                         Ok(format!(
                             "Sent in eCash transaction {}. The coin arrives at {dest} a few blocks after \
                              eCash includes it.",
-                            sent.txid
+                            sent.txid.map(|txid| txid.to_string()).unwrap_or_default()
                         ))
                     })
                 }

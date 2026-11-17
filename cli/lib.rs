@@ -188,6 +188,22 @@ pub enum Command {
         #[arg(long)]
         fee_sats: Option<u64>,
     },
+    /// Sidepot: sign a buy without posting it; prints the entry for another L1 wallet to carry
+    GameSignBuy {
+        /// Keys to buy, 1 to 1000
+        keys: u16,
+        /// The most to pay per key; default: the current price stepped three times
+        #[arg(long)]
+        max_price_sats: Option<u64>,
+    },
+    /// Sidepot: sign a cashout without posting it
+    GameSignCashout {
+        /// Sats to pay out; 0 is the whole balance
+        amount_sats: u64,
+        /// The Sidepot address that receives the coin; default: a new address of this node's wallet
+        #[arg(long)]
+        dest: Option<Address>,
+    },
     /// Sidepot: deposit from the enforcer's wallet into this node's game account
     GameDeposit {
         #[arg(long)]
@@ -215,7 +231,7 @@ pub enum Command {
 }
 
 #[derive(Clone, Debug, Parser)]
-#[command(name = "sidepot-node-cli", author, version = concat!("0.1.0 (on Thunder ", env!("CARGO_PKG_VERSION"), ")"), about, long_about = None)]
+#[command(name = "sidepot-node-cli", author, version = concat!("0.1.2 (on Thunder ", env!("CARGO_PKG_VERSION"), ")"), about, long_about = None)]
 pub struct Cli {
     /// Base URL used for requests to the RPC server.
     #[arg(default_value = "http://localhost:6009", long)]
@@ -458,6 +474,17 @@ where
             let sent =
                 rpc_client.game_cashout(amount_sats, dest, fee_sats).await?;
             serde_json::to_string_pretty(&sent)?
+        }
+        Command::GameSignBuy {
+            keys,
+            max_price_sats,
+        } => {
+            let signed = rpc_client.game_sign_buy(keys, max_price_sats).await?;
+            serde_json::to_string_pretty(&signed)?
+        }
+        Command::GameSignCashout { amount_sats, dest } => {
+            let signed = rpc_client.game_sign_cashout(amount_sats, dest).await?;
+            serde_json::to_string_pretty(&signed)?
         }
         Command::GameDeposit {
             value_sats,

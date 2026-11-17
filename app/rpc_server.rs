@@ -727,6 +727,44 @@ impl rpc_api::wallet::RpcServer for RpcServerImpl<true> {
             .unwrap()
     }
 
+    async fn game_sign_buy(
+        &self,
+        keys: u16,
+        max_price_sats: Option<u64>,
+    ) -> RpcResult<serde_json::Value> {
+        let app = self.app.clone();
+        self.app
+            .local_pool
+            .spawn_pinned(move || async move {
+                let signed = app
+                    .game_sign_buy(keys, max_price_sats)
+                    .await
+                    .map_err(custom_err)?;
+                serde_json::to_value(signed).map_err(custom_err)
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn game_sign_cashout(
+        &self,
+        amount_sats: u64,
+        dest: Option<Address>,
+    ) -> RpcResult<serde_json::Value> {
+        let app = self.app.clone();
+        self.app
+            .local_pool
+            .spawn_pinned(move || async move {
+                let signed = app
+                    .game_sign_cashout(amount_sats, dest)
+                    .await
+                    .map_err(custom_err)?;
+                serde_json::to_value(signed).map_err(custom_err)
+            })
+            .await
+            .unwrap()
+    }
+
     async fn game_cashout(
         &self,
         amount_sats: u64,

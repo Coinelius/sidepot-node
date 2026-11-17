@@ -34,6 +34,8 @@ pub struct Config {
     pub anchor: [u8; 32],
     /// JSON-RPC URL of the L1 node.
     pub l1_rpc_url: String,
+    /// Base URL of an Esplora server to read L1 blocks from instead of the L1 node.
+    pub l1_esplora_url: Option<String>,
     /// The L1 node's cookie file, read on every request since it changes when the node restarts.
     pub l1_rpc_cookie: Option<PathBuf>,
     /// `user:password`, used when there is no cookie file.
@@ -107,7 +109,9 @@ pub enum FetchError {
         method: &'static str,
         message: String,
     },
-    #[error("L1 node returned a malformed block {block_hash}: {what}")]
+    #[error("Esplora request `{path}` failed: {message}")]
+    Esplora { path: String, message: String },
+    #[error("L1 source returned a malformed block {block_hash}: {what}")]
     Malformed {
         block_hash: bitcoin::BlockHash,
         what: &'static str,
@@ -154,63 +158,164 @@ fn sats(value: &Value) -> Option<u64> {
     Some((value.as_f64()? * 1e8).round() as u64)
 }
 
-/// The bid of the block's BMM for this slot: the fee of the M8 transaction that commits to the h* the coinbase's
-/// M7 accepts and to the previous block (an M8 is only valid in the block after the one it names).
-fn bmm_bid(block: &Value, txs: &[Value]) -> Option<u64> {
-    let mut prev =
-        const_hex::decode(block["previousblockhash"].as_str()?).ok()?;
-    prev.reverse();
-    let hstar =
-        txs.first()?["vout"].as_array()?.iter().find_map(
-            |o| match script(o)?.as_slice() {
-                [0x6a, 0x25, 0xd1, 0x61, 0x73, 0x68, slot, h @ ..]
-                    if *slot == THIS_SIDECHAIN && h.len() == 32 =>
-                {
-                    Some(h.to_vec())
+/// Index of the block's BMM request for this slot: the M8 transaction that commits to the h* the coinbase's M7
+/// accepts and to the previous block (an M8 is only valid in the block after the one it names). `txs` are the
+/// output scripts of each transaction, coinbase first; `prev` is the previous block's hash in header byte order.
+fn bmm_request(txs: &[Vec<Vec<u8>>], prev: &[u8; 32]) -> Option<usize> {
+    let hstar = txs.first()?.iter().find_map(|script| match script.as_slice() {
+        [0x6a, 0x25, 0xd1, 0x61, 0x73, 0x68, slot, h @ ..]
+            if *slot == THIS_SIDECHAIN && h.len() == 32 =>
+        {
+            Some(h.to_vec())
+        }
+        _ => None,
+    })?;
+    txs.iter().enumerate().skip(1).find_map(|(index, scripts)| {
+        scripts
+            .iter()
+            .any(|script| match script.as_slice() {
+                [0x6a, 0x44, 0x00, 0xbf, 0x00, slot, rest @ ..] => {
+                    *slot == THIS_SIDECHAIN
+                        && rest.len() == 64
+                        && rest[..32] == hstar[..]
+                        && rest[32..] == prev[..]
                 }
-                _ => None,
-            },
-        )?;
-    txs.iter().skip(1).find_map(|tx| {
-        let commits =
-            tx["vout"]
-                .as_array()?
-                .iter()
-                .any(|o| match script(o).as_deref() {
-                    Some([0x6a, 0x44, 0x00, 0xbf, 0x00, slot, rest @ ..]) => {
-                        *slot == THIS_SIDECHAIN
-                            && rest.len() == 64
-                            && rest[..32] == hstar[..]
-                            && rest[32..] == prev[..]
-                    }
-                    _ => false,
-                });
-        commits.then(|| sats(&tx["fee"])).flatten()
+                _ => false,
+            })
+            .then_some(index)
     })
 }
 
-/// Reads one L1 block from the L1 node. Needs the block's undo data (an unpruned node), for transaction fees.
+/// What the game reads from a block, given every transaction's output scripts (coinbase first), the previous
+/// block's hash in header byte order, and a way to learn one transaction's fee.
+fn game_data(
+    txs: &[Vec<Vec<u8>>],
+    prev: &[u8; 32],
+    fee_of: impl FnOnce(usize) -> Result<Option<u64>, FetchError>,
+) -> Result<MainGameData, FetchError> {
+    let entries = txs
+        .iter()
+        .skip(1)
+        .flatten()
+        .filter_map(|script| Entry::from_script(script)?.ok())
+        .map(|entry| entry.encode())
+        .collect();
+    let bmm_bid = match bmm_request(txs, prev) {
+        Some(index) => fee_of(index)?,
+        None => None,
+    };
+    Ok(MainGameData {
+        n_tx: txs.len() as u32,
+        entries,
+        bmm_bid,
+    })
+}
+
+/// Reads one L1 block: from the Esplora server if one is configured, otherwise from the L1 node.
 pub fn fetch(
     block_hash: &bitcoin::BlockHash,
 ) -> Result<MainGameData, FetchError> {
     let config = config().ok_or(FetchError::NoConfig)?;
-    let block = rpc(config, "getblock", json!([block_hash.to_string(), 3]))?;
-    let txs = block["tx"].as_array().ok_or(FetchError::Malformed {
+    match &config.l1_esplora_url {
+        Some(esplora) => fetch_esplora(esplora, block_hash),
+        None => fetch_rpc(config, block_hash),
+    }
+}
+
+/// Reads one L1 block from the L1 node. Needs the block's undo data (an unpruned node), for transaction fees.
+fn fetch_rpc(
+    config: &Config,
+    block_hash: &bitcoin::BlockHash,
+) -> Result<MainGameData, FetchError> {
+    let malformed = |what| FetchError::Malformed {
         block_hash: *block_hash,
-        what: "no transaction list",
-    })?;
-    let entries = txs
+        what,
+    };
+    let block = rpc(config, "getblock", json!([block_hash.to_string(), 3]))?;
+    let txs = block["tx"]
+        .as_array()
+        .ok_or(malformed("no transaction list"))?;
+    let scripts: Vec<Vec<Vec<u8>>> = txs
         .iter()
-        .skip(1)
-        .flat_map(|tx| tx["vout"].as_array().into_iter().flatten())
-        .filter_map(script)
-        .filter_map(|script| Entry::from_script(&script)?.ok())
-        .map(|entry| entry.encode())
+        .map(|tx| {
+            tx["vout"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(script)
+                .collect()
+        })
         .collect();
-    Ok(MainGameData {
-        n_tx: txs.len() as u32,
-        entries,
-        bmm_bid: bmm_bid(&block, txs),
+    let prev: [u8; 32] = block["previousblockhash"]
+        .as_str()
+        .and_then(|hex| const_hex::decode(hex).ok())
+        .and_then(|mut bytes| {
+            bytes.reverse();
+            bytes.try_into().ok()
+        })
+        .unwrap_or([0; 32]);
+    game_data(&scripts, &prev, |index| Ok(sats(&txs[index]["fee"])))
+}
+
+/// Reads one L1 block from an Esplora server, for a node with no L1 node beside it: the raw block, checked
+/// against the hash asked for and its own merkle root, so the server cannot change what the block holds. The
+/// one thing taken on its word is the fee of the block's BMM request, which a block does not commit to.
+fn fetch_esplora(
+    esplora: &str,
+    block_hash: &bitcoin::BlockHash,
+) -> Result<MainGameData, FetchError> {
+    use std::io::Read as _;
+    let base = esplora.trim_end_matches('/');
+    let malformed = |what| FetchError::Malformed {
+        block_hash: *block_hash,
+        what,
+    };
+    let get = |path: String| {
+        ureq::get(&format!("{base}{path}"))
+            .timeout(Duration::from_secs(120))
+            .call()
+            .map_err(|e| FetchError::Esplora {
+                path: path.clone(),
+                message: e.to_string(),
+            })
+    };
+    let mut raw = Vec::new();
+    get(format!("/block/{block_hash}/raw"))?
+        .into_reader()
+        .take(64 << 20)
+        .read_to_end(&mut raw)
+        .map_err(|e| FetchError::Esplora {
+            path: format!("/block/{block_hash}/raw"),
+            message: e.to_string(),
+        })?;
+    let block: bitcoin::Block = bitcoin::consensus::deserialize(&raw)
+        .map_err(|_| malformed("not a block"))?;
+    if block.block_hash() != *block_hash {
+        return Err(malformed("not the block asked for"));
+    }
+    if !block.check_merkle_root() {
+        return Err(malformed("transactions do not match the merkle root"));
+    }
+    let scripts: Vec<Vec<Vec<u8>>> = block
+        .txdata
+        .iter()
+        .map(|tx| {
+            tx.output
+                .iter()
+                .map(|output| output.script_pubkey.to_bytes())
+                .collect()
+        })
+        .collect();
+    let prev = block.header.prev_blockhash.to_byte_array();
+    game_data(&scripts, &prev, |index| {
+        let txid = block.txdata[index].compute_txid();
+        let tx: Value = get(format!("/tx/{txid}"))?.into_json().map_err(|e| {
+            FetchError::Esplora {
+                path: format!("/tx/{txid}"),
+                message: e.to_string(),
+            }
+        })?;
+        Ok(tx["fee"].as_u64())
     })
 }
 

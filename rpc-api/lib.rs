@@ -571,6 +571,23 @@ pub mod wallet {
             fee_sats: Option<u64>,
         ) -> RpcResult<serde_json::Value>;
 
+        /// Sidepot: sign a buy like `game_buy` without posting it. The result's `entry` is the hex data of one
+        /// `OP_RETURN` output (a single push) that any L1 wallet can carry.
+        #[method(name = "game_sign_buy")]
+        async fn game_sign_buy(
+            &self,
+            keys: u16,
+            max_price_sats: Option<u64>,
+        ) -> RpcResult<serde_json::Value>;
+
+        /// Sidepot: sign a cashout like `game_cashout` without posting it.
+        #[method(name = "game_sign_cashout")]
+        async fn game_sign_cashout(
+            &self,
+            amount_sats: u64,
+            dest: Option<Address>,
+        ) -> RpcResult<serde_json::Value>;
+
         /// Sidepot: deposit from the enforcer's wallet into this node's game account. Returns the L1
         /// transaction id.
         #[method(name = "game_deposit")]

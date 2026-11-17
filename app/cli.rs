@@ -102,7 +102,7 @@ static DEFAULT_DATA_DIR: LazyLock<Option<PathBuf>> =
 
 /// Sidepot's own version, beside the Thunder version it is built on.
 const SIDEPOT_VERSION: &str =
-    concat!("0.1.0 (on Thunder ", env!("CARGO_PKG_VERSION"), ")");
+    concat!("0.1.2 (on Thunder ", env!("CARGO_PKG_VERSION"), ")");
 
 const DEFAULT_NET_ADDR: SocketAddr =
     ipv4_socket_addr([0, 0, 0, 0], 4000 + THIS_SIDECHAIN as u16);
@@ -254,6 +254,11 @@ pub(super) struct Cli {
     /// so it must keep block undo data (not pruned).
     #[arg(default_value = "http://127.0.0.1:8332", long)]
     l1_rpc_url: String,
+    /// Sidepot: base URL of an Esplora server to read L1 blocks from instead of the L1 node, for a node with a
+    /// remote enforcer and no L1 node beside it. Blocks are checked against their hash; the fee of a block's
+    /// BMM request is taken on the server's word.
+    #[arg(long)]
+    l1_esplora_url: Option<String>,
     /// Sidepot: the L1 node's cookie file.
     #[arg(long)]
     l1_rpc_cookie: Option<PathBuf>,
@@ -304,6 +309,7 @@ impl Cli {
                 self.game_anchor.to_byte_array()
             },
             l1_rpc_url: self.l1_rpc_url,
+            l1_esplora_url: self.l1_esplora_url,
             l1_rpc_cookie: self.l1_rpc_cookie,
             l1_rpc_userpass: self.l1_rpc_userpass,
             producer: self.producer_key.unwrap_or([0; 32]),
