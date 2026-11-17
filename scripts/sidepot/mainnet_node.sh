@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Starts (or restarts) a Sidepot mainnet node that follows and validates the chain. It reads eCash from the local
 # full node and the mainnet enforcer. It does not produce blocks unless a producer key is given and the enforcer
-# has a wallet.
+# has a wallet: set PRODUCER_KEY to the game account (64 hex) that earns the block bonus, and ENFORCER_GRPC to an
+# enforcer started with a wallet. Blocks are only produced when the node's `mine` command is called.
 set -euo pipefail
 DIR=${SIDEPOT_MAINNET:-/opt/sidepot-mainnet}
 BIN=${SIDEPOT_BIN:-/opt/sidepot-mainnet/bin}
@@ -13,6 +14,7 @@ nohup setsid "$BIN/thunder_app" --headless --network mainnet --datadir "$DIR/dat
   --mainchain-grpc-url "${ENFORCER_GRPC:-http://127.0.0.1:50053}" \
   --l1-rpc-url "${L1_RPC:-http://127.0.0.1:8542}" --l1-rpc-cookie "${L1_COOKIE:-/opt/mainnet-full/.cookie}" \
   --rpc-addr "$RPC_ADDR" --private-rpc-addr "$RPC_ADDR" --net-addr "${NET_ADDR:-0.0.0.0:4188}" \
+  ${PRODUCER_KEY:+--producer-key "$PRODUCER_KEY"} \
   --log-level info >> "$DIR/node.log" 2>&1 </dev/null &
 echo $! > "$DIR/node.pid"
 sleep 8
