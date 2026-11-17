@@ -330,6 +330,46 @@ pub fn preview(
 
 /// Runs `game` over the L1 blocks after the last it processed, up to and including `last` (a block hash and its
 /// height), for a block whose parent is `prev_side_hash`.
+/// How many L1 blocks hold something for the next Sidepot block to settle: blocks the tip's game has not
+/// processed, at most one below `main_tip` (the newest a block bid for now could process), that carry entries
+/// or deposits into game accounts, or that open the game. A producer that bids only when this is above zero
+/// pays for no empty Sidepot blocks.
+///
+/// Returns `None` while the game is off.
+pub fn to_settle(
+    rotxn: &RoTxn,
+    archive: &Archive,
+    state: &State,
+    main_tip: bitcoin::BlockHash,
+) -> Result<Option<u32>, AdvanceError> {
+    let Some(config) = config() else {
+        return Ok(None);
+    };
+    let processed = state
+        .try_get_game(rotxn)?
+        .map_or(config.start_height.saturating_sub(1), |game| game.height);
+    let tip = archive.get_main_header_info(rotxn, &main_tip)?;
+    let (mut hash, mut height) =
+        (tip.prev_block_hash, tip.height.saturating_sub(1));
+    let mut count = 0;
+    while height > processed && hash != bitcoin::BlockHash::all_zeros() {
+        let data = archive.get_main_game_data(rotxn, &hash)?;
+        let info = archive.get_main_block_info(rotxn, &hash)?;
+        let deposit = info.events.iter().any(|event| {
+            matches!(event, BlockEvent::Deposit(deposit) if deposit.game_account.is_some())
+        });
+        if deposit
+            || !data.decode_entries().is_empty()
+            || height == config.start_height
+        {
+            count += 1;
+        }
+        hash = archive.get_main_header_info(rotxn, &hash)?.prev_block_hash;
+        height -= 1;
+    }
+    Ok(Some(count))
+}
+
 fn run(
     rotxn: &RoTxn,
     archive: &Archive,

@@ -58,6 +58,8 @@ pub struct GameView {
     pub start_height: u32,
     /// This node's account key, if its wallet has a seed.
     pub key: Option<[u8; 32]>,
+    /// L1 blocks holding moves or deposits that the next Sidepot block would settle.
+    pub to_settle: u32,
 }
 
 impl GameView {
@@ -139,7 +141,10 @@ impl App {
             None => thunder::game::initial()
                 .ok_or_else(|| game_err("the game is not configured"))?,
         };
+        let to_settle =
+            self.node.game_to_settle(tip.block_hash)?.unwrap_or(0);
         Ok(GameView {
+            to_settle,
             confirmed,
             preview,
             tip_height: tip.height,

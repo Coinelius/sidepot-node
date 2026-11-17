@@ -519,6 +519,20 @@ where
         )
     }
 
+    /// Sidepot: how many L1 blocks hold something for the next Sidepot block to settle.
+    pub fn game_to_settle(
+        &self,
+        main_tip: bitcoin::BlockHash,
+    ) -> Result<Option<u32>, Error> {
+        let rotxn = self.env.read_txn().map_err(EnvError::from)?;
+        Ok(crate::game::to_settle(
+            &rotxn,
+            &self.archive,
+            &self.state,
+            main_tip,
+        )?)
+    }
+
     /// Sidepot: the game state at the tip, if any block has been connected.
     pub fn try_get_game(&self) -> Result<Option<sidepot_core::Game>, Error> {
         let rotxn = self.env.read_txn().map_err(EnvError::from)?;

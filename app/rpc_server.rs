@@ -462,7 +462,8 @@ impl<const ENABLE_PRIVATE_API: bool> rpc_api::node::RpcServer
     }
 
     async fn game_state(&self) -> RpcResult<serde_json::Value> {
-        let preview = game_preview(&self.app).await;
+        let view = self.app.game_view().await.ok();
+        let preview = view.as_ref().map(|view| view.preview.clone());
         // Before the first Sidepot block there is no stored game: report the opening one.
         let Some(game) = self
             .app
@@ -478,6 +479,10 @@ impl<const ENABLE_PRIVATE_API: bool> rpc_api::node::RpcServer
             .map_or(serde_json::Value::Null, |config| {
                 config.start_height.into()
             });
+        // What a block producer watches: L1 blocks with moves or deposits the next Sidepot block would settle.
+        state["to_settle"] = view
+            .as_ref()
+            .map_or(serde_json::Value::Null, |view| view.to_settle.into());
         state["preview"] =
             preview.as_ref().map_or(serde_json::Value::Null, game_json);
         Ok(state)

@@ -90,3 +90,9 @@ The programs are `target/release/sidepot-node` and `target/release/sidepot-node-
 - A block header commits to the game's state after the block, and names its producer's game account.
 - A deposit addressed to `spot:<game account key>` credits that game account instead of making a coin.
 - A block's coinbase must pay exactly the cashouts of the eCash blocks it processes.
+
+## Producing blocks
+
+`scripts/sidepot/producer.py` bids for a Sidepot block only when one is worth its bid: when eCash blocks hold moves
+or deposits to settle (`to_settle` in `game-state`), or when the block bonus on offer is larger than the bid. An idle
+game costs nothing. It needs the node's JSON-RPC and an enforcer wallet with some ECX.
