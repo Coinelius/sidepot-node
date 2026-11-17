@@ -45,7 +45,7 @@ semver = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
-sidepot-core = { path = "../../sidepot/crates/sidepot-core" }
+sidepot-core = { git = "https://github.com/Coinelius/sidepot", rev = "31937a57cc51460a185a2f428cbaef74e8f2b8c1" }
 smallvec = { workspace = true, features = ["const_generics"] }
 sneed = { workspace = true, features = ["observe"] }
 thiserror = { workspace = true }

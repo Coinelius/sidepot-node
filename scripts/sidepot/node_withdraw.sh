@@ -6,7 +6,7 @@ DIR=/opt/sidepot-regtest
 SLOT=88
 CLI="/usr/local/bin/trixie-exec /opt/ecash-1.2.0/bin/bitcoin-cli -datadir=$DIR/node -rpcwallet=test"
 SP=/root/sidepot-build/target/release/sidepot-cli
-N="/root/sidepot-thunder-build/target/release/thunder_app_cli --rpc-url http://127.0.0.1:6088"
+N="/root/sidepot-thunder-build/target/release/sidepot-node-cli --rpc-url http://127.0.0.1:6088"
 MINE="python3 $DIR/regtest_miner.py"
 RPC=http://127.0.0.1:18943; COOKIE=$DIR/node/regtest/.cookie
 START=$(cat $DIR/sidepot-node.start)

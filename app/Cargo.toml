@@ -13,7 +13,7 @@ bitcoin = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
 const-hex = { workspace = true }
 serde_json = { workspace = true }
-sidepot-core = { path = "../../sidepot/crates/sidepot-core" }
+sidepot-core = { git = "https://github.com/Coinelius/sidepot", rev = "31937a57cc51460a185a2f428cbaef74e8f2b8c1" }
 dirs = { workspace = true }
 fallible-iterator = { workspace = true }
 futures = { workspace = true }
@@ -61,5 +61,5 @@ reserve-port = { workspace = true }
 workspace = true
 
 [[bin]]
-name = "thunder_app"
+name = "sidepot-node"
 path = "main.rs"
