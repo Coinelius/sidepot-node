@@ -102,7 +102,7 @@ static DEFAULT_DATA_DIR: LazyLock<Option<PathBuf>> =
 
 /// Sidepot's own version, beside the Thunder version it is built on.
 const SIDEPOT_VERSION: &str =
-    concat!("0.1.2 (on Thunder ", env!("CARGO_PKG_VERSION"), ")");
+    concat!("0.1.3 (on Thunder ", env!("CARGO_PKG_VERSION"), ")");
 
 const DEFAULT_NET_ADDR: SocketAddr =
     ipv4_socket_addr([0, 0, 0, 0], 4000 + THIS_SIDECHAIN as u16);

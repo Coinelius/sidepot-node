@@ -60,6 +60,8 @@ pub struct GameView {
     pub key: Option<[u8; 32]>,
     /// L1 blocks holding moves or deposits that the next Sidepot block would settle.
     pub to_settle: u32,
+    /// L1 blocks holding ordinary deposits or withdrawal events that the next Sidepot block would connect.
+    pub peg_waiting: u32,
 }
 
 impl GameView {
@@ -148,8 +150,10 @@ impl App {
         };
         let to_settle =
             self.node.game_to_settle(tip.block_hash)?.unwrap_or(0);
+        let peg_waiting = self.node.peg_waiting(tip.block_hash)?;
         Ok(GameView {
             to_settle,
+            peg_waiting,
             confirmed,
             preview,
             tip_height: tip.height,

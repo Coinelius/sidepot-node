@@ -3,7 +3,9 @@
 
 Every POLL seconds it asks the node for the game and bids for the next Sidepot block if
 
-  - eCash blocks hold moves or deposits that a Sidepot block would settle (`to_settle` above zero), or
+  - eCash blocks hold moves or deposits that a Sidepot block would settle (`to_settle` above zero),
+  - eCash blocks hold ordinary deposits or withdrawal events for the sidechain (`peg_waiting` above zero),
+  - sidechain transactions are waiting in the node's mempool (`mempool_txs` above zero), or
   - the block bonus on offer is larger than the bid.
 
 Otherwise it does nothing, so an idle game costs nothing. A bid is paid only if an eCash miner includes it.
@@ -43,6 +45,10 @@ def reason(state):
     """Why a block is worth bidding for now, or None."""
     if state.get("to_settle"):
         return f"{state['to_settle']} eCash block(s) to settle"
+    if state.get("peg_waiting"):
+        return f"{state['peg_waiting']} eCash block(s) with sidechain deposits or withdrawal events"
+    if state.get("mempool_txs"):
+        return f"{state['mempool_txs']} sidechain transaction(s) waiting"
     pool = (state.get("preview") or state)["bonus_pool_sats"]
     bonus = min(int(pool * POOL_SHARE), BID_MULTIPLE * BID)
     if bonus > BID:

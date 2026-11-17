@@ -533,6 +533,20 @@ where
         )?)
     }
 
+    /// Sidepot: L1 blocks holding ordinary deposits or withdrawal events the next block would connect.
+    pub fn peg_waiting(
+        &self,
+        main_tip: bitcoin::BlockHash,
+    ) -> Result<u32, Error> {
+        let rotxn = self.env.read_txn().map_err(EnvError::from)?;
+        Ok(crate::game::peg_waiting(
+            &rotxn,
+            &self.archive,
+            &self.state,
+            main_tip,
+        )?)
+    }
+
     /// Sidepot: the game state at the tip, if any block has been connected.
     pub fn try_get_game(&self) -> Result<Option<sidepot_core::Game>, Error> {
         let rotxn = self.env.read_txn().map_err(EnvError::from)?;

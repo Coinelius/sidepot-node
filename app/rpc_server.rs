@@ -483,6 +483,16 @@ impl<const ENABLE_PRIVATE_API: bool> rpc_api::node::RpcServer
         state["to_settle"] = view
             .as_ref()
             .map_or(serde_json::Value::Null, |view| view.to_settle.into());
+        // Ordinary sidechain business waiting for a block: L1 blocks with deposits that make a coin or with
+        // withdrawal events, and transactions in this node's mempool.
+        state["peg_waiting"] = view
+            .as_ref()
+            .map_or(serde_json::Value::Null, |view| view.peg_waiting.into());
+        state["mempool_txs"] = self
+            .app
+            .node
+            .get_all_transactions()
+            .map_or(serde_json::Value::Null, |txs| txs.len().into());
         state["preview"] =
             preview.as_ref().map_or(serde_json::Value::Null, game_json);
         Ok(state)

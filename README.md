@@ -95,5 +95,6 @@ The programs are `target/release/sidepot-node` and `target/release/sidepot-node-
 ## Producing blocks
 
 `scripts/sidepot/producer.py` bids for a Sidepot block only when one is worth its bid: when eCash blocks hold moves
-or deposits to settle (`to_settle` in `game-state`), or when the block bonus on offer is larger than the bid. An idle
+or deposits to settle (`to_settle` in `game-state`), when ordinary sidechain deposits, withdrawal events or
+transactions are waiting (`peg_waiting`, `mempool_txs`), or when the block bonus on offer is larger than the bid. An idle
 game costs nothing. It needs the node's JSON-RPC and an enforcer wallet with some ECX.

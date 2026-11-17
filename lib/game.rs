@@ -475,6 +475,48 @@ pub fn to_settle(
     Ok(Some(count))
 }
 
+/// How many L1 blocks hold ordinary sidechain business for the next Sidepot block: deposits that make a coin
+/// (not ones into game accounts, which `to_settle` counts) and withdrawal bundle events, in the L1 blocks after
+/// the one the sidechain tip was built on, up to `main_tip`. Looks back at most `PEG_LOOKBACK` blocks.
+pub fn peg_waiting(
+    rotxn: &RoTxn,
+    archive: &Archive,
+    state: &State,
+    main_tip: bitcoin::BlockHash,
+) -> Result<u32, AdvanceError> {
+    const PEG_LOOKBACK: u32 = 4032;
+    let connected = match state.try_get_tip(rotxn)? {
+        // A block connects the peg data of the L1 blocks up to the one it was built on.
+        Some(side_tip) => {
+            Some(archive.get_header(rotxn, side_tip)?.prev_main_hash)
+        }
+        None => None,
+    };
+    let mut hash = main_tip;
+    let mut count = 0;
+    for _ in 0..PEG_LOOKBACK {
+        if Some(hash) == connected || hash == bitcoin::BlockHash::all_zeros() {
+            break;
+        }
+        let Some(info) = archive.try_get_main_block_info(rotxn, &hash)? else {
+            break;
+        };
+        let waiting = info.events.iter().any(|event| match event {
+            BlockEvent::Deposit(deposit) => deposit.game_account.is_none(),
+            BlockEvent::WithdrawalBundle(_) => true,
+        });
+        if waiting {
+            count += 1;
+        }
+        let Some(header) = archive.try_get_main_header_info(rotxn, &hash)?
+        else {
+            break;
+        };
+        hash = header.prev_block_hash;
+    }
+    Ok(count)
+}
+
 fn run(
     rotxn: &RoTxn,
     archive: &Archive,
