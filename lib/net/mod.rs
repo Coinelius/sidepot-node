@@ -182,12 +182,18 @@ fn ensure_seed_peers(
     Ok(())
 }
 
+/// Block Fabric's public node, nodes.blockfab.org. Given by address: the name also resolves to a second
+/// address, and dialing both names for one node made the connections drop each other.
+const MAINNET_SEED_PEER_ADDRS: &[PeerAddress<&'static str>] = &[PeerAddress {
+    host: url::Host::Ipv4(std::net::Ipv4Addr::new(216, 128, 183, 114)),
+    port: 4000 + crate::types::THIS_SIDECHAIN as u16,
+}];
+
 const fn seed_peer_addrs(
     network: Network,
 ) -> &'static [PeerAddress<&'static str>] {
     match network {
-        // No seed nodes yet: peers are given with `--add-peer` or `connect-peer`.
-        Network::Mainnet => &[],
+        Network::Mainnet => MAINNET_SEED_PEER_ADDRS,
         Network::Regtest => &[],
     }
 }
