@@ -1344,9 +1344,21 @@ pub mod mainchain {
             value_sats: u64,
             fee_sats: u64,
         ) -> Result<Txid, super::Error> {
+            self.create_deposit_tx_to(address.to_string(), value_sats, fee_sats)
+                .await
+        }
+
+        /// A deposit to this sidechain whose address is any text: `spot:<key>` credits a Sidepot game
+        /// account.
+        pub async fn create_deposit_tx_to(
+            &mut self,
+            address: String,
+            value_sats: u64,
+            fee_sats: u64,
+        ) -> Result<Txid, super::Error> {
             let request = generated::CreateDepositTransactionRequest {
                 sidechain_id: Some(THIS_SIDECHAIN as u32),
-                address: Some(address.to_string()),
+                address: Some(address),
                 value_sats: Some(value_sats),
                 fee_sats: Some(fee_sats),
             };
@@ -1364,6 +1376,37 @@ pub mod mainchain {
                 .decode::<generated::CreateDepositTransactionResponse, _>(
                     "txid",
                 )?;
+            Ok(txid)
+        }
+
+        /// Sends an L1 transaction from the enforcer's wallet whose only payment is an `OP_RETURN` output
+        /// holding `data` in one push. `fee_sats` unset leaves the fee to the enforcer's estimate.
+        pub async fn send_op_return(
+            &mut self,
+            data: &[u8],
+            fee_sats: Option<u64>,
+        ) -> Result<Txid, super::Error> {
+            use generated::send_transaction_request::{FeeRate, fee_rate::Fee};
+            let request = generated::SendTransactionRequest {
+                destinations: Default::default(),
+                fee_rate: fee_sats.map(|sats| FeeRate {
+                    fee: Some(Fee::Sats(sats)),
+                }),
+                op_return_message: Some(super::common::Hex::encode(
+                    &data.to_vec(),
+                )),
+                required_utxos: Vec::new(),
+                drain_wallet_to: None,
+            };
+            let generated::SendTransactionResponse { txid } =
+                self.0.send_transaction(request).await?.into_inner();
+            let txid = txid
+                .ok_or_else(|| {
+                    super::Error::missing_field::<
+                        generated::SendTransactionResponse,
+                    >("txid")
+                })?
+                .decode::<generated::SendTransactionResponse, _>("txid")?;
             Ok(txid)
         }
 

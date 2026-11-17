@@ -58,6 +58,17 @@ sidepot-node-cli game-account <64 hex>      # one game account
 sidepot-node-cli mine --fee-sats 10000      # bid for the next Sidepot block (waits for the next eCash block)
 ```
 
+The node can also play. Its wallet seed gives it a game account, and the enforcer's wallet pays for its moves:
+
+```bash
+sidepot-node-cli game-my-account                              # its key, spot: address, balance and keys
+sidepot-node-cli game-deposit --value-sats 50000000 --fee-sats 1000
+sidepot-node-cli game-buy 3                                   # 3 keys, at most the price after three steps
+sidepot-node-cli game-cashout 20000000                        # to a new address of the node's wallet
+```
+
+The desktop window's Sidepot tab does the same.
+
 `sidepot-node-cli --help` lists the rest. A node on other ports is reached with `--rpc-url`.
 
 ## Building

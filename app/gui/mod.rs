@@ -15,6 +15,7 @@ mod mempool_explorer;
 mod miner;
 mod parent_chain;
 mod seed;
+mod sidepot;
 mod util;
 mod withdrawals;
 
@@ -26,6 +27,7 @@ use mempool_explorer::MemPoolExplorer;
 use miner::Miner;
 use parent_chain::ParentChain;
 use seed::SetSeed;
+use sidepot::Sidepot;
 use withdrawals::Withdrawals;
 
 use self::util::UiExt;
@@ -40,6 +42,7 @@ pub struct EguiApp {
     miner: Miner,
     parent_chain: ParentChain,
     set_seed: SetSeed,
+    sidepot: Sidepot,
     tab: Tab,
     withdrawals: Withdrawals,
 }
@@ -47,6 +50,8 @@ pub struct EguiApp {
 #[derive(Default, EnumIter, Eq, PartialEq, strum::Display)]
 enum Tab {
     #[default]
+    #[strum(to_string = "Sidepot")]
+    Sidepot,
     #[strum(to_string = "Parent Chain")]
     ParentChain,
     #[strum(to_string = "Coins")]
@@ -214,6 +219,7 @@ impl EguiApp {
             miner: Miner::default(),
             parent_chain,
             set_seed: SetSeed::default(),
+            sidepot: Sidepot::default(),
             tab: Tab::default(),
             withdrawals: Withdrawals::default(),
         }
@@ -247,6 +253,7 @@ impl eframe::App for EguiApp {
             egui::Panel::bottom("bottom_panel")
                 .show(ui, |ui| self.bottom_panel.show(&mut self.miner, ui));
             egui::CentralPanel::default().show(ui, |ui| match self.tab {
+                Tab::Sidepot => self.sidepot.show(self.app.as_ref(), ui),
                 Tab::ParentChain => {
                     self.parent_chain.show(self.app.as_ref(), ui)
                 }

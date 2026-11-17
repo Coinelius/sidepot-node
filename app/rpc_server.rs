@@ -70,24 +70,7 @@ fn account_json(
 /// Sidepot: the game run on to the L1 tip the enforcer reports, for showing moves before a Sidepot block has
 /// processed them. `None` if it cannot be worked out just now (the tip's data has not been stored yet).
 async fn game_preview(app: &App) -> Option<sidepot_core::Game> {
-    let main_tip = app
-        .node
-        .with_cusf_mainchain(|cusf_mainchain| cusf_mainchain.clone())
-        .get_chain_tip()
-        .await
-        .ok()?
-        .block_hash;
-    // A node that neither produces blocks nor has peers learns of new L1 blocks only here. Stored blocks cost
-    // nothing to ask for again.
-    if !app
-        .node
-        .request_mainchain_ancestor_infos(main_tip)
-        .await
-        .ok()?
-    {
-        return None;
-    }
-    app.node.preview_game(main_tip).ok().flatten()
+    app.game_view().await.ok().map(|view| view.preview)
 }
 
 #[derive(Clone)]
@@ -693,6 +676,89 @@ impl rpc_api::wallet::RpcServer for RpcServerImpl<true> {
             },
             fees_sats: template.fees.to_sat(),
         })
+    }
+
+    async fn game_my_account(&self) -> RpcResult<serde_json::Value> {
+        let app = self.app.clone();
+        self.app
+            .local_pool
+            .spawn_pinned(move || async move {
+                let key =
+                    app.wallet.game_account_key().map_err(custom_err)?;
+                let view = app.game_view().await.map_err(custom_err)?;
+                let mut account = serde_json::to_value(
+                    view.confirmed_account().unwrap_or_default(),
+                )
+                .map_err(custom_err)?;
+                account["key"] = const_hex::encode(key).into();
+                account["address"] =
+                    format!("spot:{}", const_hex::encode(key)).into();
+                account["preview"] =
+                    serde_json::to_value(view.account().unwrap_or_default())
+                        .map_err(custom_err)?;
+                Ok(account)
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn game_buy(
+        &self,
+        keys: u16,
+        max_price_sats: Option<u64>,
+        fee_sats: Option<u64>,
+    ) -> RpcResult<serde_json::Value> {
+        let app = self.app.clone();
+        self.app
+            .local_pool
+            .spawn_pinned(move || async move {
+                let sent = app
+                    .game_buy(keys, max_price_sats, fee_sats)
+                    .await
+                    .map_err(custom_err)?;
+                serde_json::to_value(sent).map_err(custom_err)
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn game_cashout(
+        &self,
+        amount_sats: u64,
+        dest: Option<Address>,
+        fee_sats: Option<u64>,
+    ) -> RpcResult<serde_json::Value> {
+        let app = self.app.clone();
+        self.app
+            .local_pool
+            .spawn_pinned(move || async move {
+                let sent = app
+                    .game_cashout(amount_sats, dest, fee_sats)
+                    .await
+                    .map_err(custom_err)?;
+                serde_json::to_value(sent).map_err(custom_err)
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn game_deposit(
+        &self,
+        value_sats: u64,
+        fee_sats: u64,
+    ) -> RpcResult<String> {
+        let app = self.app.clone();
+        self.app
+            .local_pool
+            .spawn_pinned(move || async move {
+                let txid = app
+                    .game_deposit(value_sats, fee_sats)
+                    .await
+                    .map_err(custom_err)?;
+                Ok(txid.to_string())
+            })
+            .await
+            .unwrap()
     }
 
     async fn get_new_address(&self) -> RpcResult<Address> {

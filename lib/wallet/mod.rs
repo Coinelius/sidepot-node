@@ -240,6 +240,33 @@ impl Wallet {
         Ok(())
     }
 
+    /// Sidepot: the key of this wallet's game account, derived from the seed. Entries are signed with it and
+    /// its x-only public key names the account (`spot:<key>`).
+    pub fn game_keypair(&self) -> Result<bitcoin::secp256k1::Keypair, Error> {
+        use bitcoin::secp256k1::{Keypair, SECP256K1, SecretKey};
+        let rotxn = self.env.read_txn().map_err(EnvError::from)?;
+        let seed = self
+            .seed
+            .try_get(&rotxn, &0)
+            .map_err(DbError::from)?
+            .ok_or(Error::NoSeed)?;
+        let mut material = seed.to_vec();
+        loop {
+            let secret =
+                blake3::derive_key("Sidepot game account key v1", &material);
+            // Almost every 32 bytes are a valid key; on the rare miss, derive again from longer input.
+            if let Ok(secret_key) = SecretKey::from_slice(&secret) {
+                return Ok(Keypair::from_secret_key(SECP256K1, &secret_key));
+            }
+            material.push(0);
+        }
+    }
+
+    /// Sidepot: the x-only public key of this wallet's game account.
+    pub fn game_account_key(&self) -> Result<[u8; 32], Error> {
+        Ok(self.game_keypair()?.x_only_public_key().0.serialize())
+    }
+
     pub fn has_seed(&self) -> Result<bool, Error> {
         let rotxn = self.env.read_txn().map_err(EnvError::from)?;
         Ok(self

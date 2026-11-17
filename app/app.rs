@@ -46,6 +46,8 @@ pub enum Error {
     Miner(#[from] miner::Error),
     #[error("node error")]
     Node(#[source] Box<node::Error>),
+    #[error("{0}")]
+    Game(String),
     #[error("No CUSF mainchain wallet client")]
     NoCusfMainchainWalletClient,
     #[error("Failed to request mainchain ancestor info for {block_hash}")]
@@ -126,6 +128,13 @@ pub struct App {
     pub node: Arc<Node>,
     pub wallet: Wallet,
     pub miner: Option<Arc<TokioRwLock<Miner>>>,
+    /// Sidepot: the enforcer's wallet, for deposits and entries. Its own handle, so a game move does not wait
+    /// for a `mine` call, which holds the miner until the next L1 block.
+    pub(crate) game_wallet:
+        Option<mainchain::WalletClient<tonic::transport::Channel>>,
+    /// Sidepot: the highest entry nonce this node has used, so two moves sent before the first is mined get
+    /// different nonces.
+    pub(crate) game_nonce: Arc<parking_lot::Mutex<u64>>,
     pub utxos: Arc<RwLock<HashMap<OutPoint, Output>>>,
     task: Arc<JoinHandle<()>>,
     pub transaction: Arc<RwLock<Transaction>>,
@@ -328,6 +337,7 @@ impl App {
                 block_producer_client,
             )
         };
+        let game_wallet = cusf_mainchain_wallet.clone();
         let miner = cusf_mainchain_wallet
             .clone()
             .map(|wallet| {
@@ -374,6 +384,8 @@ impl App {
             node,
             wallet,
             miner,
+            game_wallet,
+            game_nonce: Arc::new(parking_lot::Mutex::new(0)),
             utxos,
             task: Arc::new(task),
             transaction: Arc::new(RwLock::new(Transaction {

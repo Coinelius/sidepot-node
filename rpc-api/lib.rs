@@ -545,6 +545,41 @@ pub mod wallet {
             &self,
         ) -> RpcResult<GetBlockTemplateResponse>;
 
+        /// Sidepot: this node's own game account: its key, its `spot:` deposit address, and its balance,
+        /// keys and nonce, final and (`preview`) as of the latest L1 block.
+        #[method(name = "game_my_account")]
+        async fn game_my_account(&self) -> RpcResult<serde_json::Value>;
+
+        /// Sidepot: buy keys in the current round from this node's game account. The price limit defaults
+        /// to the current price stepped three times; the entry lapses after three counted L1 blocks. The
+        /// enforcer's wallet pays the L1 fee.
+        #[method(name = "game_buy")]
+        async fn game_buy(
+            &self,
+            keys: u16,
+            max_price_sats: Option<u64>,
+            fee_sats: Option<u64>,
+        ) -> RpcResult<serde_json::Value>;
+
+        /// Sidepot: pay sats (0: everything) out of this node's game account as an ordinary coin, to
+        /// `dest` or else to a new address of this node's wallet.
+        #[method(name = "game_cashout")]
+        async fn game_cashout(
+            &self,
+            amount_sats: u64,
+            dest: Option<Address>,
+            fee_sats: Option<u64>,
+        ) -> RpcResult<serde_json::Value>;
+
+        /// Sidepot: deposit from the enforcer's wallet into this node's game account. Returns the L1
+        /// transaction id.
+        #[method(name = "game_deposit")]
+        async fn game_deposit(
+            &self,
+            value_sats: u64,
+            fee_sats: u64,
+        ) -> RpcResult<String>;
+
         /// Get a new address
         #[method(name = "get_new_address")]
         async fn get_new_address(&self) -> RpcResult<Address>;

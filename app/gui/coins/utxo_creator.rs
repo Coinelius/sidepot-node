@@ -68,7 +68,7 @@ impl UtxoCreator {
         ui.horizontal(|ui| {
             ui.monospace("Value:       ");
             ui.add(egui::TextEdit::singleline(&mut self.value));
-            ui.monospace("BTC");
+            ui.monospace("ECX");
         });
         ui.horizontal(|ui| {
             ui.monospace("Address:     ");
@@ -107,7 +107,7 @@ impl UtxoCreator {
             ui.horizontal(|ui| {
                 ui.monospace("Main Fee:    ");
                 ui.add(egui::TextEdit::singleline(&mut self.main_fee));
-                ui.monospace("BTC");
+                ui.monospace("ECX");
             });
         }
         ui.horizontal(|ui| {

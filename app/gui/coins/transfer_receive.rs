@@ -41,7 +41,7 @@ impl Transfer {
                     .hint_text("amount")
                     .desired_width(80.);
                 ui.add(amount_edit);
-                ui.label("BTC");
+                ui.label("ECX");
             })
             .response
         });
@@ -51,7 +51,7 @@ impl Transfer {
                     .hint_text("fee")
                     .desired_width(80.);
                 ui.add(fee_edit);
-                ui.label("BTC");
+                ui.label("ECX");
             })
             .response
         });

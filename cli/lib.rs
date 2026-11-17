@@ -164,6 +164,37 @@ pub enum Command {
         /// The account key, 64 hex characters
         account_key: String,
     },
+    /// Sidepot: this node's own game account
+    GameMyAccount,
+    /// Sidepot: buy keys from this node's game account
+    GameBuy {
+        /// Keys to buy, 1 to 1000
+        keys: u16,
+        /// The most to pay per key; default: the current price stepped three times
+        #[arg(long)]
+        max_price_sats: Option<u64>,
+        /// L1 fee of the entry's transaction
+        #[arg(long)]
+        fee_sats: Option<u64>,
+    },
+    /// Sidepot: pay out of this node's game account as an ordinary coin
+    GameCashout {
+        /// Sats to pay out; 0 is the whole balance
+        amount_sats: u64,
+        /// The Sidepot address that receives the coin; default: a new address of this node's wallet
+        #[arg(long)]
+        dest: Option<Address>,
+        /// L1 fee of the entry's transaction
+        #[arg(long)]
+        fee_sats: Option<u64>,
+    },
+    /// Sidepot: deposit from the enforcer's wallet into this node's game account
+    GameDeposit {
+        #[arg(long)]
+        value_sats: u64,
+        #[arg(long)]
+        fee_sats: u64,
+    },
     /// Sign a transaction, and optionally broadcast it.
     SignTransaction {
         #[arg(value_parser = JsonParser::<thunder_types::Transaction>::parse)]
@@ -406,6 +437,32 @@ where
             let account = rpc_client.game_account(account_key).await?;
             serde_json::to_string_pretty(&account)?
         }
+        Command::GameMyAccount => {
+            let account = rpc_client.game_my_account().await?;
+            serde_json::to_string_pretty(&account)?
+        }
+        Command::GameBuy {
+            keys,
+            max_price_sats,
+            fee_sats,
+        } => {
+            let sent =
+                rpc_client.game_buy(keys, max_price_sats, fee_sats).await?;
+            serde_json::to_string_pretty(&sent)?
+        }
+        Command::GameCashout {
+            amount_sats,
+            dest,
+            fee_sats,
+        } => {
+            let sent =
+                rpc_client.game_cashout(amount_sats, dest, fee_sats).await?;
+            serde_json::to_string_pretty(&sent)?
+        }
+        Command::GameDeposit {
+            value_sats,
+            fee_sats,
+        } => rpc_client.game_deposit(value_sats, fee_sats).await?,
         Command::SidechainWealth => {
             let sidechain_wealth = rpc_client.sidechain_wealth_sats().await?;
             format!("{sidechain_wealth}")

@@ -10,6 +10,7 @@ use tracing_subscriber::{
 mod app;
 mod cli;
 mod gui;
+mod play;
 mod line_buffer;
 mod rpc_server;
 mod util;
@@ -192,7 +193,7 @@ fn run_egui_app(
     let rpc_addr = url::Url::parse(&format!("http://{}", config.rpc_addr))
         .expect("failed to parse rpc addr");
     eframe::run_native(
-        "Thunder",
+        "Sidepot",
         native_options,
         Box::new(move |cc| {
             Ok(Box::new(gui::EguiApp::new(

@@ -57,7 +57,7 @@ impl Deposit {
                     .hint_text("amount")
                     .desired_width(80.);
                 ui.add(amount_edit);
-                ui.label("BTC");
+                ui.label("ECX");
             })
             .response
         });
@@ -67,7 +67,7 @@ impl Deposit {
                     .hint_text("fee")
                     .desired_width(80.);
                 ui.add(fee_edit);
-                ui.label("BTC");
+                ui.label("ECX");
             })
             .response
         });
@@ -205,7 +205,7 @@ impl Withdrawal {
                     .hint_text("amount")
                     .desired_width(80.);
                 ui.add(amount_edit);
-                ui.label("BTC");
+                ui.label("ECX");
             })
             .response
         });
@@ -215,7 +215,7 @@ impl Withdrawal {
                     .hint_text("fee")
                     .desired_width(80.);
                 ui.add(fee_edit);
-                ui.label("BTC");
+                ui.label("ECX");
             })
             .response
         });
@@ -226,7 +226,7 @@ impl Withdrawal {
                         .hint_text("mainchain fee")
                         .desired_width(80.);
                 ui.add(fee_edit);
-                ui.label("BTC");
+                ui.label("ECX");
             })
             .response
         });
