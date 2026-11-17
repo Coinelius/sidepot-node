@@ -638,8 +638,12 @@ impl State {
         &self,
         rotxn: &RoTxn,
     ) -> Result<Option<sidepot_core::Game>, Error> {
-        let last = self.game_snapshots.last(rotxn).map_err(DbError::from)?;
-        Ok(last.map(|(_height, game)| game))
+        // Looked up by the tip's height. Not `last()`: heights are keyed in little-endian bytes, so the last key
+        // is not the highest height.
+        match self.try_get_height(rotxn)? {
+            Some(height) => self.try_get_game_at(rotxn, height),
+            None => Ok(None),
+        }
     }
 
     /// The game state the block at `height` of the active chain left.
