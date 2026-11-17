@@ -528,6 +528,12 @@ impl App {
             game_advance.map_or_else(Vec::new, |advance| advance.payouts);
         let producer =
             thunder::game::config().map_or([0; 32], |config| config.producer);
+        // Without --producer-key the block bonus goes to this node's own game account.
+        let producer = if producer == [0; 32] {
+            self.wallet.game_account_key().unwrap_or([0; 32])
+        } else {
+            producer
+        };
         let (bribe, header, body, fees) = if prev_side_hash == tip_hash {
             const NUM_TRANSACTIONS: usize = 1000;
             let (txs, tx_fees) =

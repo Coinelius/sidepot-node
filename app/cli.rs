@@ -100,6 +100,10 @@ static DEFAULT_DATA_DIR: LazyLock<Option<PathBuf>> =
         Some(data_dir) => Some(data_dir.join("sidepot")),
     });
 
+/// Sidepot's own version, beside the Thunder version it is built on.
+const SIDEPOT_VERSION: &str =
+    concat!("0.1.0 (on Thunder ", env!("CARGO_PKG_VERSION"), ")");
+
 const DEFAULT_NET_ADDR: SocketAddr =
     ipv4_socket_addr([0, 0, 0, 0], 4000 + THIS_SIDECHAIN as u16);
 
@@ -176,7 +180,7 @@ fn parse_network_magic(s: &str) -> Result<[u8; 4], const_hex::FromHexError> {
 }
 
 #[derive(Clone, Debug, Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(name = "sidepot-node", author, version = SIDEPOT_VERSION, about, long_about = None)]
 pub(super) struct Cli {
     /// Additional peers to dial on startup, as `host:port`. May be given
     /// more than once, and is dialed in addition to the network's built-in
@@ -223,8 +227,9 @@ pub(super) struct Cli {
     #[arg(long, value_parser = parse_network_magic)]
     network_magic: Option<[u8; 4]>,
     /// Socket address to host the private RPC server
-    #[arg(default_value_t = DEFAULT_RPC_ADDR, long, short)]
-    private_rpc_addr: SocketAddr,
+    /// [default: the RPC server's address]
+    #[arg(long, short)]
+    private_rpc_addr: Option<SocketAddr>,
     /// Socket address to host the RPC server
     #[arg(default_value_t = DEFAULT_RPC_ADDR, long, short)]
     rpc_addr: SocketAddr,
@@ -292,11 +297,6 @@ impl Cli {
             saturating_pred_level(self.log_level)
         };
         let wallet_dir = self.wallet_dir.unwrap_or_else(|| datadir.clone());
-        if self.producer_key.is_none() {
-            tracing::warn!(
-                "no --producer-key: block bonuses of blocks this node produces cannot be cashed out"
-            );
-        }
         let game_config = thunder::game::Config {
             start_height: self.game_start_height,
             anchor: {
@@ -323,7 +323,7 @@ impl Cli {
             net_addr: self.net_addr,
             network: self.network,
             network_magic_override: self.network_magic,
-            private_rpc_addr: self.private_rpc_addr,
+            private_rpc_addr: self.private_rpc_addr.unwrap_or(self.rpc_addr),
             rpc_addr: self.rpc_addr,
             server_names: HashSet::from_iter(self.server_names),
             wallet_dir,

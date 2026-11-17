@@ -71,7 +71,7 @@ jobs:
           mkdir "$name"
           cp "target/${{ matrix.target }}/release/sidepot-node${{ matrix.suffix }}" \
              "target/${{ matrix.target }}/release/sidepot-node-cli${{ matrix.suffix }}" \
-             README.md LICENSE.txt "$name/"
+             README.md "$name/"
           if command -v zip >/dev/null; then zip -r "$name.zip" "$name"; else 7z a "$name.zip" "$name"; fi
           if command -v sha256sum >/dev/null; then sha256sum "$name.zip" > "$name.zip.sha256"; else shasum -a 256 "$name.zip" > "$name.zip.sha256"; fi
           echo "ARCHIVE=$name.zip" >> "$GITHUB_ENV"

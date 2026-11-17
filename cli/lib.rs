@@ -215,7 +215,7 @@ pub enum Command {
 }
 
 #[derive(Clone, Debug, Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(name = "sidepot-node-cli", author, version = concat!("0.1.0 (on Thunder ", env!("CARGO_PKG_VERSION"), ")"), about, long_about = None)]
 pub struct Cli {
     /// Base URL used for requests to the RPC server.
     #[arg(default_value = "http://localhost:6009", long)]

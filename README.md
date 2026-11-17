@@ -45,8 +45,9 @@ sidepot-node --headless \
 | `--l1-rpc-cookie` / `--l1-rpc-userpass` | how to log in to it: its cookie file, or `user:password` | |
 | `--game-start-height` | the game's first eCash block | 984960 |
 | `--game-anchor` | hash of the eCash block that mined the slot's proposal | mainnet block 982,723 |
-| `--producer-key` | the game account (64 hex characters) that earns the block bonus of blocks this node produces | none |
-| `--rpc-addr`, `--private-rpc-addr` | where the node's own JSON-RPC listens | `127.0.0.1:6088` |
+| `--producer-key` | the game account (64 hex characters) that earns the block bonus of blocks this node produces | the node's own game account |
+| `--rpc-addr` | where the node's own JSON-RPC listens | `127.0.0.1:6088` |
+| `--private-rpc-addr` | where its private JSON-RPC listens | the same as `--rpc-addr` |
 | `--net-addr` | where it listens for other Sidepot nodes | `0.0.0.0:4088` |
 
 The first start reads every eCash block header from the enforcer, which takes about a minute and about 900 MB of
