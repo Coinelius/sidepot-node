@@ -98,3 +98,10 @@ The programs are `target/release/sidepot-node` and `target/release/sidepot-node-
 or deposits to settle (`to_settle` in `game-state`), when ordinary sidechain deposits, withdrawal events or
 transactions are waiting (`peg_waiting`, `mempool_txs`), or when the block bonus on offer is larger than the bid. An idle
 game costs nothing. It needs the node's JSON-RPC and an enforcer wallet with some ECX.
+
+To compete for the block bonus, set `BONUS_PERCENT`. The bonus is 5% of the bonus pool and at most twice the block's
+bid, so a bid of half the bonus earns all of it and a higher bid only outbids other producers. The script starts at
+50% of the bonus on offer, raises its bid by `BONUS_STEP` points (default 10) each time another producer's block is
+accepted, up to `BONUS_PERCENT`, and lowers it again after its own blocks. `MAX_BID_SATS` caps a bid in sats.
+
+    BONUS_PERCENT=80 MAX_BID_SATS=500000 SIDEPOT_RPC=http://127.0.0.1:6088 python3 scripts/sidepot/producer.py
