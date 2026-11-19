@@ -556,6 +556,10 @@ where
         request: Request,
         response_tx: Option<oneshot::Sender<Response>>,
     ) -> Result<(), Error> {
+        // Nobody is waiting for the answer any more: skip the work.
+        if response_tx.as_ref().is_some_and(|tx| tx.is_canceled()) {
+            return Ok(());
+        }
         match request {
             Request::AncestorInfos(main_block_hash) => {
                 let res = Self::request_ancestor_infos(
@@ -570,9 +574,15 @@ where
                 ctxt.sync_progress.set_idle();
                 let response = Response::AncestorInfos(main_block_hash, res);
                 if let Some(response_tx) = response_tx {
-                    response_tx
-                        .send(response)
-                        .map_err(|_: Response| Error::SendResponseOneshot)?;
+                    // The requester may have stopped waiting (an RPC client that timed out, say). That is
+                    // no reason to stop the task: stopping here, with more such requests queued, kept
+                    // the task restarting for as long as clients kept asking.
+                    if response_tx.send(response).is_err() {
+                        tracing::debug!(
+                            %main_block_hash,
+                            "Mainchain task: the requester stopped waiting"
+                        );
+                    }
                 } else {
                     ctxt.event_tx
                         .unbounded_send(Event::Response(response))

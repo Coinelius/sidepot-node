@@ -69,8 +69,6 @@ pub mod mainchain_task {
         },
         #[error("Send event error")]
         SendEvent(#[source] futures::channel::mpsc::SendError),
-        #[error("Send response error (oneshot)")]
-        SendResponseOneshot,
         #[error("Failed to sync sidechain tips to mainchain tip ({tip})")]
         SyncSideTipsToTip {
             tip: bitcoin::BlockHash,
