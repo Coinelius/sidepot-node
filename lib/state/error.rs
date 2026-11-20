@@ -138,7 +138,7 @@ pub enum Error {
     )]
     GamePayoutsMismatch,
     #[error(
-        "the block holds a game deposit output, and they are not active for it"
+        "game deposit outputs are not active here (coin deposits have no activation height, or the L1 block named is below it)"
     )]
     GameDepositsNotActive,
     #[error("a coinbase output cannot be a game deposit")]
