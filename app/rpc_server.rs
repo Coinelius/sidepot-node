@@ -49,6 +49,9 @@ fn game_json(game: &sidepot_core::Game) -> serde_json::Value {
             "blocks": blocks,
         })),
         "accounts": game.accounts.len(),
+        // Every sat the game holds: account balances, pot, bonus pool and dividends not yet settled. With the
+        // value of all coins it changes only by deposits and withdrawals.
+        "total_sats": u64::try_from(game.total()).unwrap_or(u64::MAX),
         // Keys bought this round, by everyone: an account's keys are those it holds in the current round.
         "keys": game.accounts.values().map(|account| account.keys).sum::<u64>(),
     })
