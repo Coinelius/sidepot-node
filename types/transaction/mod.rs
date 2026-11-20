@@ -72,6 +72,30 @@ impl Transaction {
         hash_with_scratch_buffer(self).into()
     }
 
+    /// Sidepot: the game account credits this transaction makes, as
+    /// (account key, value), in output order.
+    pub fn game_deposits(
+        &self,
+    ) -> impl Iterator<Item = ([u8; 32], bitcoin::Amount)> + '_ {
+        self.outputs
+            .iter()
+            .filter_map(|output| match output.content {
+                OutputContent::GameDeposit { value, account } => {
+                    Some((account, value))
+                }
+                OutputContent::Value(_) | OutputContent::Withdrawal { .. } => {
+                    None
+                }
+            })
+    }
+
+    /// True if any output is a game deposit
+    pub fn has_game_deposit(&self) -> bool {
+        self.outputs
+            .iter()
+            .any(|output| output.content.is_game_deposit())
+    }
+
     /// Canonical encoding as bytes. The canonical encoding is used for hashing,
     /// but other encodings may be used at eg. networking, rpc levels.
     pub fn canonical_bytes(&self) -> borsh::io::Result<Vec<u8>> {

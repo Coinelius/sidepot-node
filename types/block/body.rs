@@ -255,6 +255,10 @@ impl Body {
                 accumulator_del.push(utxo_hash.into());
             }
             for (vout, output) in tx.transaction.outputs.iter().enumerate() {
+                // a game deposit is not a coin
+                if output.content.is_game_deposit() {
+                    continue;
+                }
                 let outpoint = OutPoint::Regular {
                     txid,
                     vout: vout as u32,
@@ -297,6 +301,10 @@ impl Body {
         for tx in txs {
             let txid = tx.transaction.txid();
             for (vout, output) in tx.transaction.outputs.iter().enumerate() {
+                // a game deposit is not a coin
+                if output.content.is_game_deposit() {
+                    continue;
+                }
                 let vout = vout as u32;
                 let outpoint = OutPoint::Regular { txid, vout };
                 res.insert(outpoint, output.clone());
@@ -315,6 +323,25 @@ impl Body {
             .map(|output| output.get_value())
             .checked_sum()
             .ok_or(error::AmountOverflow)
+    }
+
+    /// Sidepot: the game account credits this body makes, as (account key,
+    /// value), in the order the game applies them: transaction order, then
+    /// output order. A coinbase holds none.
+    pub fn game_deposits(&self) -> Vec<([u8; 32], bitcoin::Amount)> {
+        self.transactions
+            .iter()
+            .flat_map(|tx| tx.game_deposits())
+            .collect()
+    }
+
+    /// True if any output of the body, coinbase included, is a game deposit
+    pub fn has_game_deposit(&self) -> bool {
+        self.coinbase
+            .outputs
+            .iter()
+            .any(|output| output.content.is_game_deposit())
+            || self.transactions.iter().any(|tx| tx.has_game_deposit())
     }
 
     /// Calculate total number of inputs across all transactions in a block body

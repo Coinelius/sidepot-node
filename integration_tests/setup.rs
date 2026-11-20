@@ -216,7 +216,8 @@ impl Sidechain for PostSetup {
             utxo.output.address.to_string() == address
                 && match utxo.output.content {
                     OutputContent::Value(utxo_value) => utxo_value == value,
-                    OutputContent::Withdrawal { .. } => false,
+                    OutputContent::Withdrawal { .. }
+                    | OutputContent::GameDeposit { .. } => false,
                 }
                 && match utxo.outpoint {
                     thunder::types::OutPoint::Deposit(outpoint) => {
