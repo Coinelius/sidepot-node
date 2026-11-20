@@ -424,6 +424,45 @@ impl Wallet {
         })
     }
 
+    /// Sidepot: move `value` of this wallet's coins into the game account `account`, and pay the change, if
+    /// any, to a new address. The game deposit is the first output.
+    pub fn create_game_fund(
+        &self,
+        accumulator: &Accumulator,
+        account: [u8; 32],
+        value: bitcoin::Amount,
+        fee: bitcoin::Amount,
+    ) -> Result<Transaction, Error> {
+        let (total, coins) = self
+            .select_coins(value.checked_add(fee).ok_or(AmountOverflowError)?)?;
+        let change = total - value - fee;
+        let inputs: Vec<_> = coins
+            .into_iter()
+            .map(|(outpoint, output)| {
+                let utxo_hash = hash(&PointedOutput { outpoint, output });
+                (outpoint, utxo_hash)
+            })
+            .collect();
+        let input_utxo_hashes: Vec<UtreexoNodeHash> =
+            inputs.iter().map(|(_, hash)| hash.into()).collect();
+        let proof = accumulator.prove(&input_utxo_hashes)?;
+        let mut outputs = vec![Output {
+            address: Address::ALL_ZEROS,
+            content: OutputContent::GameDeposit { value, account },
+        }];
+        if change > bitcoin::Amount::ZERO {
+            outputs.push(Output {
+                address: self.get_new_address()?,
+                content: OutputContent::Value(change),
+            });
+        }
+        Ok(Transaction {
+            inputs: inputs.into(),
+            proof,
+            outputs: outputs.into(),
+        })
+    }
+
     pub fn select_coins(
         &self,
         value: bitcoin::Amount,
@@ -1128,6 +1167,62 @@ mod tests {
                 .get_addresses()?
                 .contains(&tx.outputs.as_slice()[1].address)
         );
+
+        let _unused = std::fs::remove_dir_all(&test_dir);
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_game_fund() -> anyhow::Result<()> {
+        let (test_dir, wallet, accumulator) =
+            funded_wallet("game_fund", &[10_000])?;
+        let account = [7u8; 32];
+
+        let tx = wallet.create_game_fund(
+            &accumulator,
+            account,
+            bitcoin::Amount::from_sat(6000),
+            bitcoin::Amount::from_sat(500),
+        )?;
+        assert_eq!(tx.outputs.len(), 2);
+        let deposit = &tx.outputs.as_slice()[0];
+        assert_eq!(deposit.address, Address::ALL_ZEROS);
+        assert_eq!(
+            deposit.content,
+            OutputContent::GameDeposit {
+                value: bitcoin::Amount::from_sat(6000),
+                account,
+            }
+        );
+        let change = &tx.outputs.as_slice()[1];
+        assert_eq!(value_of(change), 10_000 - 6000 - 500);
+        assert!(change.content.is_value());
+        assert!(wallet.get_addresses()?.contains(&change.address));
+        assert_eq!(
+            tx.game_deposits().collect::<Vec<_>>(),
+            vec![(account, bitcoin::Amount::from_sat(6000))]
+        );
+
+        // Nothing left over: no change output.
+        let tx = wallet.create_game_fund(
+            &accumulator,
+            account,
+            bitcoin::Amount::from_sat(9500),
+            bitcoin::Amount::from_sat(500),
+        )?;
+        assert_eq!(tx.outputs.len(), 1);
+        assert!(tx.outputs.as_slice()[0].content.is_game_deposit());
+
+        // More than the wallet holds.
+        assert!(matches!(
+            wallet.create_game_fund(
+                &accumulator,
+                account,
+                bitcoin::Amount::from_sat(9501),
+                bitcoin::Amount::from_sat(500),
+            ),
+            Err(Error::NotEnoughFunds)
+        ));
 
         let _unused = std::fs::remove_dir_all(&test_dir);
         Ok(())

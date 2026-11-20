@@ -605,6 +605,17 @@ pub mod wallet {
             fee_sats: u64,
         ) -> RpcResult<String>;
 
+        /// Sidepot: move sats of this node's wallet coins into a game account (64 hex characters; default:
+        /// this node's own) with a sidechain transaction. The Sidepot block that includes it credits the
+        /// account. Refused until coin deposits are active at the tip. Returns the transaction id.
+        #[method(name = "game_fund")]
+        async fn game_fund(
+            &self,
+            amount_sats: u64,
+            account: Option<String>,
+            fee_sats: Option<u64>,
+        ) -> RpcResult<Txid>;
+
         /// Get a new address
         #[method(name = "get_new_address")]
         async fn get_new_address(&self) -> RpcResult<Address>;

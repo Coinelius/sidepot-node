@@ -16,6 +16,9 @@ pub const CASHOUT_WINDOW: u32 = 144;
 /// L1 fee of a move's transaction when none is given.
 pub const DEFAULT_ENTRY_FEE_SATS: u64 = 1_000;
 
+/// Sidechain fee of a `game_fund` transaction when none is given.
+pub const DEFAULT_FUND_FEE_SATS: u64 = 1_000;
+
 /// The price one step up: 1% per L1 block with a buy.
 pub fn step_price(price: u64) -> u64 {
     let stepped = u128::from(price) * 101 / 100;
@@ -352,6 +355,40 @@ impl App {
             amount_sats: Some(amount_sats),
             dest: Some(dest),
         })
+    }
+
+    /// Moves `amount_sats` of this node's wallet coins into the game account `account` (unset: this node's
+    /// own) with a sidechain transaction that holds a game deposit output. The account is credited by the
+    /// Sidepot block that includes the transaction. Returns the transaction id.
+    pub fn game_fund(
+        &self,
+        amount_sats: u64,
+        account: Option<[u8; 32]>,
+        fee_sats: Option<u64>,
+    ) -> Result<thunder::types::Txid, Error> {
+        if amount_sats == 0 {
+            return Err(game_err("the amount must be above zero"));
+        }
+        let account = match account {
+            Some(account) => account,
+            None => self.wallet.game_account_key()?,
+        };
+        let l1_form = format!("spot:{}", const_hex::encode(account));
+        if sidepot_core::deposit_player(&l1_form) != Some(account) {
+            return Err(game_err("not a valid account key"));
+        }
+        let accumulator = self.node.get_tip_accumulator()?;
+        let tx = self.wallet.create_game_fund(
+            &accumulator,
+            account,
+            bitcoin::Amount::from_sat(amount_sats),
+            bitcoin::Amount::from_sat(
+                fee_sats.unwrap_or(DEFAULT_FUND_FEE_SATS),
+            ),
+        )?;
+        let txid = tx.txid();
+        let () = self.sign_and_send(tx)?;
+        Ok(txid)
     }
 
     /// Deposits `value_sats` from the enforcer's wallet into this node's game account.

@@ -211,6 +211,17 @@ pub enum Command {
         #[arg(long)]
         fee_sats: u64,
     },
+    /// Sidepot: move this node's wallet coins into a game account with a sidechain transaction
+    GameFund {
+        /// Sats to move into the game account
+        amount_sats: u64,
+        /// The account key, 64 hex characters; default: this node's own game account
+        #[arg(long)]
+        account: Option<String>,
+        /// Sidechain fee of the transaction
+        #[arg(long)]
+        fee_sats: Option<u64>,
+    },
     /// Sign a transaction, and optionally broadcast it.
     SignTransaction {
         #[arg(value_parser = JsonParser::<thunder_types::Transaction>::parse)]
@@ -490,6 +501,15 @@ where
             value_sats,
             fee_sats,
         } => rpc_client.game_deposit(value_sats, fee_sats).await?,
+        Command::GameFund {
+            amount_sats,
+            account,
+            fee_sats,
+        } => {
+            let txid =
+                rpc_client.game_fund(amount_sats, account, fee_sats).await?;
+            format!("{txid}")
+        }
         Command::SidechainWealth => {
             let sidechain_wealth = rpc_client.sidechain_wealth_sats().await?;
             format!("{sidechain_wealth}")

@@ -837,6 +837,29 @@ impl rpc_api::wallet::RpcServer for RpcServerImpl<true> {
             .unwrap()
     }
 
+    async fn game_fund(
+        &self,
+        amount_sats: u64,
+        account: Option<String>,
+        fee_sats: Option<u64>,
+    ) -> RpcResult<Txid> {
+        let account = account
+            .map(|hex| {
+                let mut key = [0; 32];
+                if hex.len() == 64
+                    && const_hex::decode_to_slice(&hex, &mut key).is_ok()
+                {
+                    Ok(key)
+                } else {
+                    Err(custom_err_msg("an account key is 64 hex characters"))
+                }
+            })
+            .transpose()?;
+        self.app
+            .game_fund(amount_sats, account, fee_sats)
+            .map_err(custom_err)
+    }
+
     async fn get_new_address(&self) -> RpcResult<Address> {
         self.app.wallet.get_new_address().map_err(custom_err)
     }

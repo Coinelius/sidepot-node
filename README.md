@@ -69,6 +69,14 @@ sidepot-node-cli game-buy 3                                   # 3 keys, at most 
 sidepot-node-cli game-cashout 20000000                        # to a new address of the node's wallet
 ```
 
+Where coin deposits are active, the node's own wallet can also fund a game account with a Sidepot transaction, with no eCash transaction involved:
+
+```bash
+sidepot-node-cli game-fund 20000000                           # this node's game account; --account <key> for another
+```
+
+Coin deposits are a consensus rule that is off unless every node of a network is started with the same `--game-coin-deposits-height <eCash height>`. No network has a default, and mainnet has no height yet: without the flag a transaction or block holding such an output is invalid.
+
 The desktop window's Sidepot tab does the same.
 
 `sidepot-node-cli --help` lists the rest. A node on other ports is reached with `--rpc-url`.
