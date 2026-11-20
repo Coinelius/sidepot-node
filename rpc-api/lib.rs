@@ -414,6 +414,14 @@ pub mod node {
             &self,
         ) -> RpcResult<Option<WithdrawalBundle>>;
 
+        /// Sidepot: the ids a block gives its coins: its coinbase txid and each transaction's txid, in the
+        /// block's order. Null if the node has no such block. For a server that keeps an address's history.
+        #[method(name = "get_block_ids")]
+        async fn get_block_ids(
+            &self,
+            block_hash: thunder_types::BlockHash,
+        ) -> RpcResult<serde_json::Value>;
+
         /// Sidepot: the game at the tip: L1 height processed, clock, round, deadline, price, pot, bonus pool
         /// and current streak. Null before the first block.
         #[method(name = "game_state")]

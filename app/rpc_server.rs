@@ -49,6 +49,8 @@ fn game_json(game: &sidepot_core::Game) -> serde_json::Value {
             "blocks": blocks,
         })),
         "accounts": game.accounts.len(),
+        // Keys bought this round, by everyone: an account's keys are those it holds in the current round.
+        "keys": game.accounts.values().map(|account| account.keys).sum::<u64>(),
     })
 }
 
@@ -255,6 +257,27 @@ impl<const ENABLE_PRIVATE_API: bool> rpc_api::node::RpcServer
         height: u32,
     ) -> RpcResult<Option<thunder::types::BlockHash>> {
         self.app.node.try_get_block_hash(height).map_err(custom_err)
+    }
+
+    async fn get_block_ids(
+        &self,
+        block_hash: thunder::types::BlockHash,
+    ) -> RpcResult<serde_json::Value> {
+        let Some(header) = self
+            .app
+            .node
+            .try_get_header(block_hash)
+            .map_err(custom_err)?
+        else {
+            return Ok(serde_json::Value::Null);
+        };
+        let body = self.app.node.get_body(block_hash).map_err(custom_err)?;
+        let txids: Vec<_> =
+            body.transactions.iter().map(|tx| tx.txid()).collect();
+        Ok(serde_json::json!({
+            "coinbase_txid": header.compute_coinbase_txid(),
+            "txids": txids,
+        }))
     }
 
     async fn get_best_sidechain_block_hash(
