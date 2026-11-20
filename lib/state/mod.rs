@@ -16,9 +16,9 @@ use crate::{
         Accumulator, Address, AmountOverflowError, AmountUnderflowError,
         Authorized, AuthorizedTransaction, BlockHash, BlockIndexEvents, Body,
         FilledTransaction, GetAddress, GetValue, Header, InPoint, M6id,
-        MerkleRoot, OutPoint, OutPointKey, Output, PointedOutput,
-        PointedOutputRef, SpentOutput, Transaction, UtreexoNodeHash,
-        UtreexoProof, VERSION, Version, WithdrawalBundle,
+        MerkleRoot, OutPoint, OutPointKey, Output, OutputContent,
+        PointedOutput, PointedOutputRef, SpentOutput, Transaction,
+        UtreexoNodeHash, UtreexoProof, VERSION, Version, WithdrawalBundle,
         WithdrawalBundleStatus,
         authorization::{self, BatchVerificationContext},
         proto::mainchain::TwoWayPegData,
@@ -411,6 +411,28 @@ impl State {
         Ok(())
     }
 
+    /// Sidepot: a game deposit output moves a value above zero to a valid account key, and has one encoding
+    /// (its unused address is all zeros). Whether a block may hold one at all is the block's question.
+    fn validate_game_deposit(output: &Output) -> Result<(), Error> {
+        let OutputContent::GameDeposit { value, account } = output.content
+        else {
+            return Ok(());
+        };
+        if value == bitcoin::Amount::ZERO {
+            return Err(Error::GameDepositZeroValue);
+        }
+        if output.address != Address::ALL_ZEROS {
+            return Err(Error::GameDepositAddress);
+        }
+        // The same test a deposit from L1 passes to reach a game account (a BIP340 x-only key): an account
+        // nobody could ever sign for is refused rather than credited.
+        let l1_form = format!("spot:{}", const_hex::encode(account));
+        if sidepot_core::deposit_player(&l1_form) != Some(account) {
+            return Err(Error::GameDepositAccount);
+        }
+        Ok(())
+    }
+
     pub fn validate_filled_transaction(
         &self,
         transaction: &FilledTransaction,
@@ -431,6 +453,7 @@ impl State {
                 .ok_or(AmountOverflowError)?;
         }
         for output in &transaction.transaction.outputs {
+            let () = Self::validate_game_deposit(output)?;
             value_out = value_out
                 .checked_add(output.get_value())
                 .ok_or(AmountOverflowError)?;
@@ -610,11 +633,14 @@ impl State {
             header,
             body,
             &[],
+            false,
         )
     }
 
     /// As [`Self::prevalidate_block`], for a block that must pay `payouts` (the game's cashouts) as the last
-    /// outputs of its coinbase, on top of the fees it may claim.
+    /// outputs of its coinbase, on top of the fees it may claim. Its transactions may hold game deposit
+    /// outputs only if `game_deposits_active`; the caller credits them to the game (see
+    /// [`crate::game::advance`]).
     pub fn prevalidate_block_with_payouts(
         &self,
         rotxn: &RoTxn,
@@ -622,6 +648,7 @@ impl State {
         header: &Header,
         body: &Body,
         payouts: &[Output],
+        game_deposits_active: bool,
     ) -> Result<PrevalidatedBlock, Error> {
         block::prevalidate(
             batch_verification_ctxt,
@@ -630,6 +657,7 @@ impl State {
             header,
             body,
             payouts,
+            game_deposits_active,
         )
     }
 

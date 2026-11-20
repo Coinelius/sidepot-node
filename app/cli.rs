@@ -269,6 +269,12 @@ pub(super) struct Cli {
     /// this node produces. Without it, bonuses go to an account nobody can cash out.
     #[arg(long, value_parser = parse_account_key)]
     producer_key: Option<[u8; 32]>,
+    /// Sidepot: coin deposits from this L1 height: a Sidepot block may hold game deposit outputs (an ordinary
+    /// coin moved into a game account by a sidechain transaction) only if the L1 block its BMM request names
+    /// is at this height or above. A consensus rule: every node of a network must use the same value. No
+    /// network has a default; without this flag such outputs are never valid.
+    #[arg(long)]
+    game_coin_deposits_height: Option<u32>,
 }
 
 fn parse_account_key(s: &str) -> Result<[u8; 32], String> {
@@ -313,6 +319,7 @@ impl Cli {
             l1_rpc_cookie: self.l1_rpc_cookie,
             l1_rpc_userpass: self.l1_rpc_userpass,
             producer: self.producer_key.unwrap_or([0; 32]),
+            coin_deposits_height: self.game_coin_deposits_height,
         };
         if thunder::game::set_config(game_config).is_err() {
             anyhow::bail!("the game config was already set");

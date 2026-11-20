@@ -59,12 +59,23 @@ fn connect_tip_(
     let block_hash = header.hash();
     // Sidepot: run the game over the L1 blocks this block must process. The header commits to the result and
     // the coinbase pays its cashouts.
+    // Then it credits the block's own game deposit outputs, which a block may hold only once coin deposits are
+    // active for the L1 block it names.
+    let coin_deposits_active = crate::game::coin_deposits_active(
+        rwtxn,
+        archive,
+        header.prev_main_hash,
+    )?;
+    if !coin_deposits_active && body.has_game_deposit() {
+        return Err(state::Error::GameDepositsNotActive.into());
+    }
     let game_advance = crate::game::advance(
         rwtxn,
         archive,
         state,
         header.prev_main_hash,
         header.prev_side_hash,
+        &body.game_deposits(),
     )?;
     let expected_game_hash = game_advance
         .as_ref()
@@ -81,6 +92,7 @@ fn connect_tip_(
         header,
         body,
         payouts,
+        coin_deposits_active,
     )?;
     if tracing::enabled!(tracing::Level::DEBUG) {
         let height = state.try_get_height(rwtxn)?;

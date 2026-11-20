@@ -137,6 +137,20 @@ pub enum Error {
         "the coinbase does not end with exactly the game's cashout payouts"
     )]
     GamePayoutsMismatch,
+    #[error(
+        "the block holds a game deposit output, and they are not active for it"
+    )]
+    GameDepositsNotActive,
+    #[error("a coinbase output cannot be a game deposit")]
+    GameDepositInCoinbase,
+    #[error("a game deposit output must have a value above zero")]
+    GameDepositZeroValue,
+    #[error("a game deposit output must have the all-zero address")]
+    GameDepositAddress,
+    #[error("a game deposit output's account is not a valid account key")]
+    GameDepositAccount,
+    #[error("a game deposit would overflow the account's balance")]
+    GameDepositOverflow,
     #[error(transparent)]
     AmountOverflow(#[from] AmountOverflowError),
     #[error(transparent)]

@@ -518,9 +518,25 @@ impl App {
         } else {
             None
         };
-        // Sidepot: the game state this block must commit to and the cashouts its coinbase must pay.
-        let game_advance =
-            self.node.advance_game(prev_main_hash, prev_side_hash)?;
+        // The transactions of the block: from the mempool if it builds on the tip, otherwise none.
+        const NUM_TRANSACTIONS: usize = 1000;
+        let (txs, tx_fees) = if prev_side_hash == tip_hash {
+            self.node
+                .get_transactions(NUM_TRANSACTIONS, prev_main_hash)?
+        } else {
+            (Vec::new(), bitcoin::Amount::ZERO)
+        };
+        // Sidepot: the game state this block must commit to and the cashouts its coinbase must pay. The game
+        // processes the block's L1 batches, then credits the game deposit outputs of its transactions.
+        let coin_deposits: Vec<_> = txs
+            .iter()
+            .flat_map(|tx| tx.transaction.transaction.game_deposits())
+            .collect();
+        let game_advance = self.node.advance_game(
+            prev_main_hash,
+            prev_side_hash,
+            &coin_deposits,
+        )?;
         let game_hash = game_advance
             .as_ref()
             .map_or([0; 32], |advance| advance.game_hash());
@@ -535,9 +551,6 @@ impl App {
             producer
         };
         let (bribe, header, body, fees) = if prev_side_hash == tip_hash {
-            const NUM_TRANSACTIONS: usize = 1000;
-            let (txs, tx_fees) =
-                self.node.get_transactions(NUM_TRANSACTIONS)?;
             let coinbase = {
                 let mut outputs = match tx_fees {
                     bitcoin::Amount::ZERO => Vec::new(),

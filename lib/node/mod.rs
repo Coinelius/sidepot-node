@@ -278,6 +278,13 @@ where
                 &self.batch_verification_ctxt,
                 transaction.borrow(),
             )?;
+            // Sidepot: the mempool takes game deposits only once the tip is eligible for them.
+            crate::game::check_mempool_transaction(
+                &rotxn,
+                &self.archive,
+                &self.state,
+                &transaction.borrow().transaction,
+            )?;
             self.mempool.put(&mut rotxn, transaction.borrow())?;
             rotxn.commit().map_err(RwTxnError::from)?;
         }
@@ -490,11 +497,13 @@ where
 
     /// Get total sidechain wealth in Bitcoin
     /// Sidepot: the game after a block built on `prev_side_hash` naming the L1 block `prev_main_hash` has
-    /// processed its L1 batches, with the cashouts its coinbase must pay. `None` while the game is off.
+    /// processed its L1 batches and then credited its own game deposit outputs (`coin_deposits`, see
+    /// [`crate::game::advance`]), with the cashouts its coinbase must pay. `None` while the game is off.
     pub fn advance_game(
         &self,
         prev_main_hash: bitcoin::BlockHash,
         prev_side_hash: Option<BlockHash>,
+        coin_deposits: &[([u8; 32], bitcoin::Amount)],
     ) -> Result<Option<crate::game::Advance>, Error> {
         let rotxn = self.env.read_txn().map_err(EnvError::from)?;
         Ok(crate::game::advance(
@@ -503,6 +512,7 @@ where
             &self.state,
             prev_main_hash,
             prev_side_hash,
+            coin_deposits,
         )?)
     }
 
@@ -558,17 +568,31 @@ where
         Ok(self.state.sidechain_wealth(&rotxn)?)
     }
 
+    /// Transactions from the mempool for a block whose BMM request names the L1 block `prev_main_hash`, and
+    /// their total fee. Sidepot: one with game deposit outputs is left waiting in the mempool unless coin
+    /// deposits are active for that block.
     pub fn get_transactions(
         &self,
         number: usize,
+        prev_main_hash: bitcoin::BlockHash,
     ) -> Result<(Vec<Authorized<FilledTransaction>>, bitcoin::Amount), Error>
     {
         let mut rwtxn = self.env.write_txn().map_err(EnvError::from)?;
+        let coin_deposits_active = crate::game::coin_deposits_active(
+            &rwtxn,
+            &self.archive,
+            prev_main_hash,
+        )?;
         let transactions = self.mempool.take(&rwtxn, number)?;
         let mut fee = bitcoin::Amount::ZERO;
         let mut returned_transactions = vec![];
         let mut spent_utxos = HashSet::new();
         for transaction in transactions {
+            if !coin_deposits_active
+                && transaction.transaction.has_game_deposit()
+            {
+                continue;
+            }
             let inputs: HashSet<_> =
                 transaction.transaction.inputs.iter().copied().collect();
             if !spent_utxos.is_disjoint(&inputs) {

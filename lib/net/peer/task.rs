@@ -691,11 +691,30 @@ impl ConnectionTask {
         let txid = tx.transaction.txid();
         let validate_tx_result = {
             let rotxn = ctxt.env.read_txn().map_err(EnvError::from)?;
-            ctxt.state.validate_transaction(
-                &rotxn,
-                &ctxt.batch_verification_ctxt,
-                &tx,
-            )
+            ctxt.state
+                .validate_transaction(
+                    &rotxn,
+                    &ctxt.batch_verification_ctxt,
+                    &tx,
+                )
+                .and_then(|fee| {
+                    // Sidepot: the mempool takes game deposits only once the tip is eligible for them.
+                    match crate::game::check_mempool_transaction(
+                        &rotxn,
+                        &ctxt.archive,
+                        &ctxt.state,
+                        &tx.transaction,
+                    ) {
+                        Ok(()) => Ok(fee),
+                        Err(crate::game::AdvanceError::State(err)) => Err(err),
+                        Err(crate::game::AdvanceError::Archive(err)) => {
+                            tracing::warn!(
+                                "cannot tell if game deposits are active: {err:#}"
+                            );
+                            Err(crate::state::Error::GameDepositsNotActive)
+                        }
+                    }
+                })
         };
         match validate_tx_result {
             Err(err) => {

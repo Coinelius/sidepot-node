@@ -42,6 +42,10 @@ pub struct Config {
     pub l1_rpc_userpass: Option<String>,
     /// The account key (BIP340 x-only) this node names in the blocks it produces, to receive block bonuses.
     pub producer: [u8; 32],
+    /// Coin deposits from this L1 height: a Sidepot block may hold game deposit outputs (an ordinary coin moved
+    /// into a game account by a sidechain transaction) only if the L1 block its BMM request names is at this
+    /// height or above. `None`: never, which is the rule every network has had so far.
+    pub coin_deposits_height: Option<u32>,
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
@@ -343,6 +347,95 @@ fn credit_deposits(game: &mut Game, events: &[BlockEvent]) {
     }
 }
 
+/// The configured activation height of coin deposits, if the game is on and it has one.
+fn coin_deposits_height() -> Option<u32> {
+    config().and_then(|config| config.coin_deposits_height)
+}
+
+/// Whether a Sidepot block whose BMM request names the L1 block `prev_main_hash` may hold game deposit outputs:
+/// the game is on, coin deposits have an activation height, and the named block is at that height or above.
+pub fn coin_deposits_active(
+    rotxn: &RoTxn,
+    archive: &Archive,
+    prev_main_hash: bitcoin::BlockHash,
+) -> Result<bool, archive::Error> {
+    active_from(coin_deposits_height(), rotxn, archive, prev_main_hash)
+}
+
+fn active_from(
+    activation: Option<u32>,
+    rotxn: &RoTxn,
+    archive: &Archive,
+    prev_main_hash: bitcoin::BlockHash,
+) -> Result<bool, archive::Error> {
+    // Unset, nothing is read: the rule is off and costs nothing.
+    let Some(activation) = activation else {
+        return Ok(false);
+    };
+    let named = archive.get_main_header_info(rotxn, &prev_main_hash)?;
+    Ok(named.height >= activation)
+}
+
+/// Whether the mempool takes a transaction with game deposit outputs now: only once the tip itself is a block
+/// that could have held one (the L1 block the tip's BMM request names is at the activation height or above).
+/// A block built on such a tip names that L1 block or a later one, so the transaction can go into the very next
+/// block (the block builder still checks the block it builds, in case L1 reorganised). Before that, and with no
+/// tip, such a transaction is refused rather than kept waiting.
+pub fn coin_deposits_active_at_tip(
+    rotxn: &RoTxn,
+    archive: &Archive,
+    state: &State,
+) -> Result<bool, AdvanceError> {
+    active_at_tip_from(coin_deposits_height(), rotxn, archive, state)
+}
+
+fn active_at_tip_from(
+    activation: Option<u32>,
+    rotxn: &RoTxn,
+    archive: &Archive,
+    state: &State,
+) -> Result<bool, AdvanceError> {
+    if activation.is_none() {
+        return Ok(false);
+    }
+    let Some(tip) = state.try_get_tip(rotxn)? else {
+        return Ok(false);
+    };
+    let named = archive.get_header(rotxn, tip)?.prev_main_hash;
+    Ok(active_from(activation, rotxn, archive, named)?)
+}
+
+/// The mempool's rule for game deposit outputs, on top of [`State::validate_transaction`]: see
+/// [`coin_deposits_active_at_tip`].
+pub fn check_mempool_transaction(
+    rotxn: &RoTxn,
+    archive: &Archive,
+    state: &State,
+    transaction: &crate::types::Transaction,
+) -> Result<(), AdvanceError> {
+    if transaction.has_game_deposit()
+        && !coin_deposits_active_at_tip(rotxn, archive, state)?
+    {
+        return Err(state::Error::GameDepositsNotActive.into());
+    }
+    Ok(())
+}
+
+/// Credits a block's game deposit outputs, in order, after everything else the block did to the game.
+fn credit_coin_deposits(
+    game: &mut Game,
+    coin_deposits: &[([u8; 32], bitcoin::Amount)],
+) -> Result<(), state::Error> {
+    for (account, value) in coin_deposits {
+        let balance = game.accounts.get(account).map_or(0, |a| a.balance);
+        if balance.checked_add(value.to_sat()).is_none() {
+            return Err(state::Error::GameDepositOverflow);
+        }
+        game.deposit(*account, value.to_sat());
+    }
+    Ok(())
+}
+
 /// The hash a block header commits to for a game state.
 pub fn game_hash(game: &Game) -> [u8; 32] {
     let bytes =
@@ -368,15 +461,48 @@ pub enum AdvanceError {
 /// accepted, if that block is an ancestor of this one; a commitment to an unknown or abandoned block earns
 /// nothing.
 ///
-/// Returns `None` while the game is off.
+/// Then the block's own game deposit outputs (`coin_deposits`: account key and value, in transaction order,
+/// then output order, see [`crate::types::Body::game_deposits`]) are credited, so the game hash commits to them
+/// and entries can spend them from the L1 blocks later Sidepot blocks process. A block may hold them only where
+/// [`coin_deposits_active`]; otherwise this fails with [`state::Error::GameDepositsNotActive`].
+///
+/// Returns `None` while the game is off (and then takes no game deposits).
 pub fn advance(
     rotxn: &RoTxn,
     archive: &Archive,
     state: &State,
     prev_main_hash: bitcoin::BlockHash,
     prev_side_hash: Option<BlockHash>,
+    coin_deposits: &[([u8; 32], bitcoin::Amount)],
 ) -> Result<Option<Advance>, AdvanceError> {
-    let Some(config) = config() else {
+    advance_with(
+        config(),
+        rotxn,
+        archive,
+        state,
+        prev_main_hash,
+        prev_side_hash,
+        coin_deposits,
+    )
+}
+
+/// [`advance`] for a given config, so that tests need not set the process-wide one.
+fn advance_with(
+    config: Option<&Config>,
+    rotxn: &RoTxn,
+    archive: &Archive,
+    state: &State,
+    prev_main_hash: bitcoin::BlockHash,
+    prev_side_hash: Option<BlockHash>,
+    coin_deposits: &[([u8; 32], bitcoin::Amount)],
+) -> Result<Option<Advance>, AdvanceError> {
+    let activation = config.and_then(|config| config.coin_deposits_height);
+    if !coin_deposits.is_empty()
+        && !active_from(activation, rotxn, archive, prev_main_hash)?
+    {
+        return Err(state::Error::GameDepositsNotActive.into());
+    }
+    let Some(config) = config else {
         return Ok(None);
     };
     // The game the parent block left. A block is not always built on the tip, so look the parent up.
@@ -392,14 +518,17 @@ pub fn advance(
     });
     // H - 2 is the parent of the block the BMM request names.
     let named = archive.get_main_header_info(rotxn, &prev_main_hash)?;
-    if named.height == 0 {
-        return Ok(Some(Advance {
+    let mut advance = if named.height == 0 {
+        Advance {
             game,
             payouts: Vec::new(),
-        }));
-    }
-    let last = (named.prev_block_hash, named.height - 1);
-    run(rotxn, archive, config, game, last, prev_side_hash).map(Some)
+        }
+    } else {
+        let last = (named.prev_block_hash, named.height - 1);
+        run(rotxn, archive, config, game, last, prev_side_hash)?
+    };
+    let () = credit_coin_deposits(&mut advance.game, coin_deposits)?;
+    Ok(Some(advance))
 }
 
 /// The game as it will stand once every L1 block up to `main_tip` has been processed: the tip's game run on
@@ -588,4 +717,299 @@ fn run(
         game.on_bmm(bmm);
     }
     Ok(Advance { game, payouts })
+}
+
+#[cfg(test)]
+mod test {
+    use bitcoin::{
+        hashes::Hash as _,
+        secp256k1::{Keypair, SECP256K1, SecretKey},
+    };
+    use sidepot_core::Entry;
+
+    use super::{
+        AdvanceError, Config, MainGameData, active_at_tip_from, advance_with,
+        credit_coin_deposits, game_hash,
+    };
+    use crate::{
+        archive::{Archive, test::main_header_info},
+        state::{self, State},
+        types::{
+            Address, Header, MerkleRoot, Output, OutputContent,
+            proto::mainchain::BlockInfo,
+        },
+    };
+
+    const START: u32 = 2;
+    const ACTIVATION: u32 = 4;
+    const CASHOUT_DEST: [u8; 20] = [9; 20];
+
+    fn config(coin_deposits_height: Option<u32>) -> Config {
+        Config {
+            start_height: START,
+            // the game's first block itself, so no earlier deposits are looked for
+            anchor: main_header_info(START).block_hash.to_byte_array(),
+            l1_rpc_url: String::new(),
+            l1_esplora_url: None,
+            l1_rpc_cookie: None,
+            l1_rpc_userpass: None,
+            producer: [0; 32],
+            coin_deposits_height,
+        }
+    }
+
+    fn main_hash(height: u32) -> bitcoin::BlockHash {
+        main_header_info(height).block_hash
+    }
+
+    fn sat(sats: u64) -> bitcoin::Amount {
+        bitcoin::Amount::from_sat(sats)
+    }
+
+    struct Fixture {
+        _temp_dir: temp_dir::TempDir,
+        env: sneed::Env,
+        archive: Archive,
+        state: State,
+        player: Keypair,
+    }
+
+    impl Fixture {
+        /// An L1 chain of heights 0 to 7. Blocks 3 and 5 hold the same entry: `player` cashes out everything.
+        fn new(name: &str) -> anyhow::Result<Self> {
+            let temp_dir = temp_dir::TempDir::with_prefix(format!(
+                "thunder-{name}-{}",
+                std::process::id()
+            ))?;
+            let mut opts = heed::EnvOpenOptions::new();
+            opts.map_size(64 * 1024 * 1024)
+                .max_dbs(Archive::NUM_DBS + State::NUM_DBS);
+            let env = unsafe { sneed::Env::open(&opts, temp_dir.path()) }?;
+            let archive = Archive::new(&env)?;
+            let state = State::new(&env)?;
+            let player = Keypair::from_secret_key(
+                SECP256K1,
+                &SecretKey::from_slice(&[0x42; 32])?,
+            );
+            let cashout = Entry::cashout(
+                &player,
+                &config(None).domain(),
+                0,
+                CASHOUT_DEST,
+                1,
+                1000,
+            )
+            .encode();
+            let mut rwtxn = env.write_txn()?;
+            for height in 0..=7 {
+                let info = main_header_info(height);
+                archive.put_main_header_info(&mut rwtxn, &info)?;
+                archive.put_main_block_info(
+                    &mut rwtxn,
+                    info.block_hash,
+                    &BlockInfo {
+                        bmm_commitment: None,
+                        events: Vec::new(),
+                    },
+                )?;
+                let data = if height == 3 || height == 5 {
+                    MainGameData {
+                        n_tx: 2,
+                        entries: vec![cashout.clone()],
+                        bmm_bid: None,
+                    }
+                } else {
+                    MainGameData {
+                        n_tx: 1,
+                        entries: Vec::new(),
+                        bmm_bid: None,
+                    }
+                };
+                archive.put_main_game_data(
+                    &mut rwtxn,
+                    info.block_hash,
+                    &data,
+                )?;
+            }
+            rwtxn.commit()?;
+            Ok(Self {
+                _temp_dir: temp_dir,
+                env,
+                archive,
+                state,
+                player,
+            })
+        }
+
+        fn player_key(&self) -> [u8; 32] {
+            self.player.x_only_public_key().0.serialize()
+        }
+
+        fn advance(
+            &self,
+            config: Option<&Config>,
+            named_height: u32,
+            parent: Option<crate::types::BlockHash>,
+            coin_deposits: &[([u8; 32], bitcoin::Amount)],
+        ) -> Result<Option<super::Advance>, AdvanceError> {
+            let rotxn = self.env.read_txn().unwrap();
+            advance_with(
+                config,
+                &rotxn,
+                &self.archive,
+                &self.state,
+                main_hash(named_height),
+                parent,
+                coin_deposits,
+            )
+        }
+    }
+
+    fn not_active<T: std::fmt::Debug>(result: Result<T, AdvanceError>) -> bool {
+        matches!(
+            result,
+            Err(AdvanceError::State(state::Error::GameDepositsNotActive))
+        )
+    }
+
+    /// The block's game deposits are credited after its L1 batches, in order, and the game hash commits to
+    /// them; a later block's L1 batches can spend them.
+    #[test]
+    fn coin_deposits_are_credited_after_the_l1_batches() -> anyhow::Result<()> {
+        let fixture = Fixture::new("game-coin-deposits-credited")?;
+        let player = fixture.player_key();
+        let other = [0x22; 32];
+        let on = config(Some(ACTIVATION));
+
+        // A block naming L1 block 4 processes L1 blocks 2 and 3. Block 3 holds the player's cashout.
+        let plain = fixture.advance(Some(&on), 4, None, &[])?.unwrap();
+        anyhow::ensure!(plain.game.height == 3);
+        anyhow::ensure!(plain.payouts.is_empty());
+        anyhow::ensure!(plain.game.total() == 0);
+
+        let deposits = [(player, sat(5000)), (other, sat(7)), (player, sat(1))];
+        let funded = fixture.advance(Some(&on), 4, None, &deposits)?.unwrap();
+        // The cashout in L1 block 3 ran first, against an empty account: nothing was paid.
+        anyhow::ensure!(funded.payouts.is_empty());
+        anyhow::ensure!(funded.game.height == 3);
+        anyhow::ensure!(funded.game.balance(&player) == 5001);
+        anyhow::ensure!(funded.game.balance(&other) == 7);
+        anyhow::ensure!(funded.game.total() == 5008);
+        // Exactly the plain game with the credits applied in order, and the hash commits to them.
+        let mut expected = plain.game.clone();
+        expected.deposit(player, 5000);
+        expected.deposit(other, 7);
+        expected.deposit(player, 1);
+        anyhow::ensure!(funded.game_hash() == game_hash(&expected));
+        anyhow::ensure!(funded.game_hash() != plain.game_hash());
+        let mut partial = plain.game.clone();
+        partial.deposit(player, 5000);
+        partial.deposit(other, 7);
+        anyhow::ensure!(funded.game_hash() != game_hash(&partial));
+
+        // Store that block and its game, then build on it: a block naming L1 block 6 processes L1 blocks 4
+        // and 5, and the cashout in block 5 now pays out the credited balance.
+        let header = Header {
+            producer: [0; 32],
+            game_hash: funded.game_hash(),
+            merkle_root: MerkleRoot::from([1; 32]),
+            prev_side_hash: None,
+            prev_main_hash: main_hash(4),
+            roots: Vec::new(),
+        };
+        let mut rwtxn = fixture.env.write_txn()?;
+        fixture.archive.put_header(&mut rwtxn, &header)?;
+        fixture
+            .state
+            .game_snapshots
+            .put(&mut rwtxn, &0, &funded.game)?;
+        rwtxn.commit()?;
+        let next = fixture
+            .advance(Some(&on), 6, Some(header.hash()), &[(other, sat(3))])?
+            .unwrap();
+        anyhow::ensure!(next.game.height == 5);
+        anyhow::ensure!(
+            next.payouts
+                == vec![Output {
+                    address: Address(CASHOUT_DEST),
+                    content: OutputContent::Value(sat(5001)),
+                }]
+        );
+        anyhow::ensure!(next.game.balance(&player) == 0);
+        anyhow::ensure!(next.game.balance(&other) == 10);
+        // The game's total moved only by the deposits and the cashout.
+        anyhow::ensure!(next.game.total() == 5008 + 3 - 5001);
+        Ok(())
+    }
+
+    #[test]
+    fn coin_deposits_need_the_activation_height() -> anyhow::Result<()> {
+        let fixture = Fixture::new("game-coin-deposits-activation")?;
+        let deposits = [(fixture.player_key(), sat(5000))];
+        let on = config(Some(ACTIVATION));
+        let off = config(None);
+        // The named L1 block is below the activation height: invalid. At it or above: valid.
+        anyhow::ensure!(not_active(fixture.advance(
+            Some(&on),
+            3,
+            None,
+            &deposits
+        )));
+        anyhow::ensure!(
+            fixture.advance(Some(&on), 4, None, &deposits)?.is_some()
+        );
+        anyhow::ensure!(
+            fixture.advance(Some(&on), 5, None, &deposits)?.is_some()
+        );
+        // No activation height, or no game at all: never valid.
+        for height in [3, 4, 7] {
+            anyhow::ensure!(not_active(fixture.advance(
+                Some(&off),
+                height,
+                None,
+                &deposits
+            )));
+            anyhow::ensure!(not_active(
+                fixture.advance(None, height, None, &deposits)
+            ));
+        }
+        // A block without game deposits gives the same game whatever the setting.
+        for height in [3, 4, 7] {
+            let with = fixture.advance(Some(&on), height, None, &[])?.unwrap();
+            let without =
+                fixture.advance(Some(&off), height, None, &[])?.unwrap();
+            anyhow::ensure!(with.game_hash() == without.game_hash());
+            anyhow::ensure!(with.payouts == without.payouts);
+        }
+        anyhow::ensure!(fixture.advance(None, 4, None, &[])?.is_none());
+        // The mempool's rule needs a tip; there is none here.
+        let rotxn = fixture.env.read_txn()?;
+        anyhow::ensure!(!active_at_tip_from(
+            Some(0),
+            &rotxn,
+            &fixture.archive,
+            &fixture.state
+        )?);
+        Ok(())
+    }
+
+    #[test]
+    fn a_credit_that_overflows_is_refused() {
+        let mut game = sidepot_core::Game::new(
+            sidepot_core::Params::default(),
+            config(None).domain(),
+            START,
+        );
+        let account = [0x22; 32];
+        assert!(
+            credit_coin_deposits(&mut game, &[(account, sat(u64::MAX - 1))])
+                .is_ok()
+        );
+        assert!(credit_coin_deposits(&mut game, &[(account, sat(1))]).is_ok());
+        assert!(matches!(
+            credit_coin_deposits(&mut game, &[(account, sat(1))]),
+            Err(state::Error::GameDepositOverflow)
+        ));
+        assert_eq!(game.balance(&account), u64::MAX);
+    }
 }
