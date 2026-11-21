@@ -45,7 +45,7 @@ semver = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
-sidepot-core = { git = "https://github.com/Coinelius/sidepot", rev = "31937a57cc51460a185a2f428cbaef74e8f2b8c1" }
+sidepot-core = { git = "https://github.com/Coinelius/sidepot", rev = "ba26981b7a8e26cc1d27c846994cd398056a916e" }
 smallvec = { workspace = true, features = ["const_generics"] }
 sneed = { workspace = true, features = ["observe"] }
 thiserror = { workspace = true }

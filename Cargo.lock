@@ -6164,6 +6164,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "sidepot-core"
 version = "0.1.0"
+source = "git+https://github.com/Coinelius/sidepot?rev=ba26981b7a8e26cc1d27c846994cd398056a916e#ba26981b7a8e26cc1d27c846994cd398056a916e"
 dependencies = [
  "secp256k1",
  "serde",

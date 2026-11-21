@@ -102,7 +102,11 @@ static DEFAULT_DATA_DIR: LazyLock<Option<PathBuf>> =
 
 /// Sidepot's own version, beside the Thunder version it is built on.
 const SIDEPOT_VERSION: &str =
-    concat!("0.1.6 (on Thunder ", env!("CARGO_PKG_VERSION"), ")");
+    concat!("0.2.0 (on Thunder ", env!("CARGO_PKG_VERSION"), ")");
+
+/// Sidepot: the eCash mainnet height at which the 0.2.0 rules begin (coin deposits, and the key price step by
+/// blocks left). Every mainnet node must agree on it.
+const MAINNET_FORK_HEIGHT: u32 = 985_824;
 
 const DEFAULT_NET_ADDR: SocketAddr =
     ipv4_socket_addr([0, 0, 0, 0], 4000 + THIS_SIDECHAIN as u16);
@@ -220,6 +224,10 @@ pub(super) struct Cli {
     /// Socket address to use for P2P networking
     #[arg(default_value_t = DEFAULT_NET_ADDR, long, short)]
     net_addr: SocketAddr,
+    /// Sidepot: a public address (IP:port) other nodes reach this node at, which it then never dials. For a
+    /// node behind one of the built-in seed addresses. May be given more than once.
+    #[arg(long)]
+    own_addr: Vec<SocketAddr>,
     /// Set the network. Setting this may affect other defaults.
     #[arg(default_value_t, long, value_enum)]
     network: Network,
@@ -274,8 +282,8 @@ pub(super) struct Cli {
     /// a sidechain transaction) only if the L1 block its BMM request names is at this height or above. The
     /// price step by blocks left: an L1 block at this height or above with a buy steps the key price by the
     /// blocks left on the round's clock (1% rising to 3%, then 10% in the final 6) instead of a flat 1%.
-    /// Consensus rules: every node of a network must use the same value. No network has a default; without
-    /// this flag neither rule is ever active.
+    /// Consensus rules: every node of a network must use the same value. On mainnet the default is eCash
+    /// block 985,824; on other networks there is none, and without this flag neither rule is ever active.
     #[arg(long)]
     game_fork_height: Option<u32>,
     /// Sidepot, test networks only: a different activation height for coin deposits alone, for a test chain
@@ -336,9 +344,13 @@ impl Cli {
             l1_rpc_cookie: self.l1_rpc_cookie,
             l1_rpc_userpass: self.l1_rpc_userpass,
             producer: self.producer_key.unwrap_or([0; 32]),
-            fork_height: self.game_fork_height,
+            fork_height: self.game_fork_height.or(
+                (self.network == Network::Mainnet)
+                    .then_some(MAINNET_FORK_HEIGHT),
+            ),
             coin_deposits_height_override: self.game_coin_deposits_height,
         };
+        thunder::net::set_own_addrs(self.own_addr.iter().copied());
         if thunder::game::set_config(game_config).is_err() {
             anyhow::bail!("the game config was already set");
         }

@@ -182,12 +182,36 @@ fn ensure_seed_peers(
     Ok(())
 }
 
-/// Block Fabric's public node, nodes.blockfab.org. Given by address: the name also resolves to a second
-/// address, and dialing both names for one node made the connections drop each other.
-const MAINNET_SEED_PEER_ADDRS: &[PeerAddress<&'static str>] = &[PeerAddress {
-    host: url::Host::Ipv4(std::net::Ipv4Addr::new(216, 128, 183, 114)),
-    port: 4000 + crate::types::THIS_SIDECHAIN as u16,
-}];
+/// Mainnet seeds. Block Fabric's public node, nodes.blockfab.org: given by address, as the name also resolves
+/// to a second address, and dialing both names for one node made the connections drop each other. And the
+/// first producer's node, reached at a relay's address. The node behind a seed address names it with
+/// `--own-addr`, so that it does not dial itself.
+const MAINNET_SEED_PEER_ADDRS: &[PeerAddress<&'static str>] = &[
+    PeerAddress {
+        host: url::Host::Ipv4(std::net::Ipv4Addr::new(216, 128, 183, 114)),
+        port: 4000 + crate::types::THIS_SIDECHAIN as u16,
+    },
+    PeerAddress {
+        host: url::Host::Ipv4(std::net::Ipv4Addr::new(91, 99, 227, 134)),
+        port: 4000 + crate::types::THIS_SIDECHAIN as u16,
+    },
+];
+
+/// Addresses other nodes reach this node at (`--own-addr`), which it therefore never dials: a node behind a
+/// seed address would otherwise connect to itself.
+static OWN_ADDRS: std::sync::OnceLock<HashSet<SocketAddr>> =
+    std::sync::OnceLock::new();
+
+/// Names this node's own public addresses. Set once at startup; later calls change nothing.
+pub fn set_own_addrs(addrs: impl IntoIterator<Item = SocketAddr>) {
+    if OWN_ADDRS.set(addrs.into_iter().collect()).is_err() {
+        tracing::debug!("this node's own addresses were already set");
+    }
+}
+
+fn is_own_addr(addr: &SocketAddr) -> bool {
+    OWN_ADDRS.get().is_some_and(|own| own.contains(addr))
+}
 
 const fn seed_peer_addrs(
     network: Network,
@@ -360,6 +384,13 @@ impl Net {
         env: Env<heed::WithoutTls>,
         mut resolved_addr: ResolvedPeerAddress,
     ) -> Result<(), error::ConnectPeer> {
+        // Sidepot: never dial an address this node is itself reached at.
+        if resolved_addr.ip_addrs().any(|ip_addr| {
+            is_own_addr(&SocketAddr::new(ip_addr, resolved_addr.port()))
+        }) {
+            tracing::debug!("not dialing this node's own address");
+            return Ok(());
+        }
         {
             let mut rwtxn = env.write_txn()?;
             self.known_peers.put(
