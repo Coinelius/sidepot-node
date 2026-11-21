@@ -12,7 +12,7 @@ use base64::Engine as _;
 use bitcoin::hashes::Hash as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sidepot_core::{Bmm, Domain, Entry, Game, Params};
+use sidepot_core::{Bmm, Domain, Entry, Fork, Game, Params};
 use sneed::RoTxn;
 
 use crate::{
@@ -42,10 +42,20 @@ pub struct Config {
     pub l1_rpc_userpass: Option<String>,
     /// The account key (BIP340 x-only) this node names in the blocks it produces, to receive block bonuses.
     pub producer: [u8; 32],
-    /// Coin deposits from this L1 height: a Sidepot block may hold game deposit outputs (an ordinary coin moved
-    /// into a game account by a sidechain transaction) only if the L1 block its BMM request names is at this
-    /// height or above. `None`: never, which is the rule every network has had so far.
-    pub coin_deposits_height: Option<u32>,
+    /// The pending fork's activation height on L1: one height that turns on every pending rule. `None`: no
+    /// fork, the rules every network has had so far. The rules key on it in two ways:
+    /// - coin deposits: a Sidepot block may hold game deposit outputs (an ordinary coin moved into a game
+    ///   account by a sidechain transaction) only if the L1 block its BMM request names is at this height or
+    ///   above (see [`Config::coin_deposits_height`]);
+    /// - the price step by blocks left: applies to each L1 block the game processes whose own height is this
+    ///   or above (see [`Config::fork`]). A Sidepot block processes L1 blocks up to two below the one that
+    ///   accepts it, so the first block with coin deposits comes before the first L1 block priced the new way
+    ///   is processed.
+    pub fork_height: Option<u32>,
+    /// For test networks only: a different activation height for coin deposits than `fork_height`, for a chain
+    /// that already holds coin deposits from before the rest of the fork was written. The command line
+    /// refuses it on mainnet.
+    pub coin_deposits_height_override: Option<u32>,
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
@@ -66,6 +76,23 @@ impl Config {
             slot: THIS_SIDECHAIN,
         }
     }
+
+    /// The activation height of coin deposits: the fork's, unless a test network overrides it.
+    pub fn coin_deposits_height(&self) -> Option<u32> {
+        self.coin_deposits_height_override.or(self.fork_height)
+    }
+
+    /// The fork as the rules crate takes it, for every L1 block the game processes. It is not part of the game
+    /// state (the header commits to that, so it must serialize as it always has): [`run`], the one place this
+    /// node processes L1 blocks, hands it over with each block.
+    pub fn fork(&self) -> Fork {
+        Fork::at(self.fork_height)
+    }
+}
+
+/// The fork this node runs the game with: [`Fork::OFF`] while the game is off or has no fork height.
+pub fn fork() -> Fork {
+    config().map_or(Fork::OFF, Config::fork)
 }
 
 /// The game before any L1 block has been processed, if the game is on.
@@ -349,7 +376,7 @@ fn credit_deposits(game: &mut Game, events: &[BlockEvent]) {
 
 /// The configured activation height of coin deposits, if the game is on and it has one.
 fn coin_deposits_height() -> Option<u32> {
-    config().and_then(|config| config.coin_deposits_height)
+    config().and_then(Config::coin_deposits_height)
 }
 
 /// Whether a Sidepot block whose BMM request names the L1 block `prev_main_hash` may hold game deposit outputs:
@@ -496,7 +523,7 @@ fn advance_with(
     prev_side_hash: Option<BlockHash>,
     coin_deposits: &[([u8; 32], bitcoin::Amount)],
 ) -> Result<Option<Advance>, AdvanceError> {
-    let activation = config.and_then(|config| config.coin_deposits_height);
+    let activation = config.and_then(Config::coin_deposits_height);
     if !coin_deposits.is_empty()
         && !active_from(activation, rotxn, archive, prev_main_hash)?
     {
@@ -562,8 +589,6 @@ pub fn preview(
     .map(Some)
 }
 
-/// Runs `game` over the L1 blocks after the last it processed, up to and including `last` (a block hash and its
-/// height), for a block whose parent is `prev_side_hash`.
 /// How many L1 blocks hold something for the next Sidepot block to settle: blocks the tip's game has not
 /// processed, at most one below `main_tip` (the newest a block bid for now could process), that carry entries
 /// or deposits into game accounts, or that open the game. A producer that bids only when this is above zero
@@ -646,6 +671,12 @@ pub fn peg_waiting(
     Ok(count)
 }
 
+/// Runs `game` over the L1 blocks after the last it processed, up to and including `last` (a block hash and its
+/// height), for a block whose parent is `prev_side_hash`.
+///
+/// Every game state this node computes, for a block it validates or builds and for a preview, comes from here,
+/// and each L1 block is processed under `config.fork()`: the price step of an L1 block at or above the fork
+/// height depends on the blocks left on the clock, and below it (or with no fork height) is the flat one.
 fn run(
     rotxn: &RoTxn,
     archive: &Archive,
@@ -687,7 +718,11 @@ fn run(
         if data.is_empty_block() {
             game.process_empty(height);
         } else {
-            let report = game.process_batch(height, &data.decode_entries());
+            let report = game.process_batch(
+                height,
+                &data.decode_entries(),
+                &config.fork(),
+            );
             payouts.extend(report.payouts.into_iter().map(|(dest, sats)| {
                 Output {
                     address: Address(dest),
@@ -745,6 +780,14 @@ mod test {
     const CASHOUT_DEST: [u8; 20] = [9; 20];
 
     fn config(coin_deposits_height: Option<u32>) -> Config {
+        config_with(coin_deposits_height, None)
+    }
+
+    /// A config with the fork at `fork_height`, and coin deposits at `coin_deposits_height` instead if given.
+    fn config_with(
+        fork_height: Option<u32>,
+        coin_deposits_height_override: Option<u32>,
+    ) -> Config {
         Config {
             start_height: START,
             // the game's first block itself, so no earlier deposits are looked for
@@ -754,7 +797,8 @@ mod test {
             l1_rpc_cookie: None,
             l1_rpc_userpass: None,
             producer: [0; 32],
-            coin_deposits_height,
+            fork_height,
+            coin_deposits_height_override,
         }
     }
 
@@ -777,6 +821,34 @@ mod test {
     impl Fixture {
         /// An L1 chain of heights 0 to 7. Blocks 3 and 5 hold the same entry: `player` cashes out everything.
         fn new(name: &str) -> anyhow::Result<Self> {
+            let cashout = Entry::cashout(
+                &Self::player(),
+                &config(None).domain(),
+                0,
+                CASHOUT_DEST,
+                1,
+                1000,
+            )
+            .encode();
+            Self::with_blocks(name, 7, |height| {
+                (height == 3 || height == 5).then(|| vec![cashout.clone()])
+            })
+        }
+
+        fn player() -> Keypair {
+            Keypair::from_secret_key(
+                SECP256K1,
+                &SecretKey::from_slice(&[0x42; 32]).unwrap(),
+            )
+        }
+
+        /// An L1 chain of heights 0 to `tip`. `entries` gives the entries of a block that holds a transaction
+        /// besides its coinbase, or `None` for a block with only its coinbase (which does not tick the clock).
+        fn with_blocks(
+            name: &str,
+            tip: u32,
+            entries: impl Fn(u32) -> Option<Vec<Vec<u8>>>,
+        ) -> anyhow::Result<Self> {
             let temp_dir = temp_dir::TempDir::with_prefix(format!(
                 "thunder-{name}-{}",
                 std::process::id()
@@ -787,21 +859,9 @@ mod test {
             let env = unsafe { sneed::Env::open(&opts, temp_dir.path()) }?;
             let archive = Archive::new(&env)?;
             let state = State::new(&env)?;
-            let player = Keypair::from_secret_key(
-                SECP256K1,
-                &SecretKey::from_slice(&[0x42; 32])?,
-            );
-            let cashout = Entry::cashout(
-                &player,
-                &config(None).domain(),
-                0,
-                CASHOUT_DEST,
-                1,
-                1000,
-            )
-            .encode();
+            let player = Self::player();
             let mut rwtxn = env.write_txn()?;
-            for height in 0..=7 {
+            for height in 0..=tip {
                 let info = main_header_info(height);
                 archive.put_main_header_info(&mut rwtxn, &info)?;
                 archive.put_main_block_info(
@@ -812,18 +872,17 @@ mod test {
                         events: Vec::new(),
                     },
                 )?;
-                let data = if height == 3 || height == 5 {
-                    MainGameData {
+                let data = match entries(height) {
+                    Some(entries) => MainGameData {
                         n_tx: 2,
-                        entries: vec![cashout.clone()],
+                        entries,
                         bmm_bid: None,
-                    }
-                } else {
-                    MainGameData {
+                    },
+                    None => MainGameData {
                         n_tx: 1,
                         entries: Vec::new(),
                         bmm_bid: None,
-                    }
+                    },
                 };
                 archive.put_main_game_data(
                     &mut rwtxn,
@@ -990,6 +1049,158 @@ mod test {
             &fixture.archive,
             &fixture.state
         )?);
+        Ok(())
+    }
+
+    /// Stores `advance` as Sidepot block 0, naming L1 block `named`, and returns its hash to build on.
+    fn store_first_block(
+        fixture: &Fixture,
+        advance: &super::Advance,
+        named: u32,
+    ) -> anyhow::Result<crate::types::BlockHash> {
+        let header = Header {
+            producer: [0; 32],
+            game_hash: advance.game_hash(),
+            merkle_root: MerkleRoot::from([1; 32]),
+            prev_side_hash: None,
+            prev_main_hash: main_hash(named),
+            roots: Vec::new(),
+        };
+        let mut rwtxn = fixture.env.write_txn()?;
+        fixture.archive.put_header(&mut rwtxn, &header)?;
+        fixture
+            .state
+            .game_snapshots
+            .put(&mut rwtxn, &0, &advance.game)?;
+        rwtxn.commit()?;
+        Ok(header.hash())
+    }
+
+    fn buy(nonce: u64) -> Vec<u8> {
+        Entry::buy(
+            &Fixture::player(),
+            &config(None).domain(),
+            1,
+            1,
+            u64::MAX,
+            nonce,
+            u32::MAX,
+        )
+        .encode()
+    }
+
+    /// The fork height reaches the rules with every L1 block processed: blocks below it step the price by the
+    /// flat 1% and leave the same game hash as a node with no fork height; from it on the step follows the
+    /// blocks left. Coin deposits can be given their own, earlier height (as on the regtest chain).
+    #[test]
+    fn the_price_fork_applies_from_its_l1_height() -> anyhow::Result<()> {
+        // L1 blocks 4, 5 and 6 each hold a buy of one key; 2, 3 and 7 hold only a coinbase. The clock ticks at
+        // 4, 5 and 6, which count 144, 143 and 142 blocks left. A Sidepot block naming L1 block N processes
+        // the L1 blocks up to N - 1.
+        let fixture = Fixture::with_blocks("game-price-fork", 8, |height| {
+            (4..=6).contains(&height).then(|| vec![buy(u64::from(height))])
+        })?;
+        let player = fixture.player_key();
+        let fund = [(player, sat(100_000_000))];
+        // Coin deposits from L1 block 4 in each; the price rule never, from L1 block 6, and from L1 block 4.
+        let no_fork = config_with(None, Some(4));
+        let fork_at_6 = config_with(Some(6), Some(4));
+        let fork_at_4 = config_with(Some(4), None);
+        anyhow::ensure!(no_fork.fork() == sidepot_core::Fork::OFF);
+        anyhow::ensure!(no_fork.coin_deposits_height() == Some(4));
+        anyhow::ensure!(fork_at_6.fork().price_height == Some(6));
+        anyhow::ensure!(fork_at_6.coin_deposits_height() == Some(4));
+        anyhow::ensure!(fork_at_4.fork().price_height == Some(4));
+        anyhow::ensure!(fork_at_4.coin_deposits_height() == Some(4));
+        anyhow::ensure!(config_with(None, None).coin_deposits_height() == None);
+
+        // Sidepot block 0 names L1 block 4, processes L1 blocks 2 and 3 and funds the player. The same block
+        // under every config.
+        let first = fixture.advance(Some(&no_fork), 4, None, &fund)?.unwrap();
+        for config in [&fork_at_6, &fork_at_4] {
+            let same = fixture.advance(Some(config), 4, None, &fund)?.unwrap();
+            anyhow::ensure!(same.game_hash() == first.game_hash());
+        }
+        let parent = Some(store_first_block(&fixture, &first, 4)?);
+        let price = |config: &Config, named: u32| {
+            fixture
+                .advance(Some(config), named, parent, &[])
+                .map(|advance| advance.unwrap())
+        };
+        // Naming L1 block 5, so up to L1 block 4: one buy with a full round left, 1% under either rule.
+        let (old, at_6, at_4) =
+            (price(&no_fork, 5)?, price(&fork_at_6, 5)?, price(&fork_at_4, 5)?);
+        anyhow::ensure!(old.game.height == 4 && old.game.price == 1_010_000);
+        anyhow::ensure!(at_6.game_hash() == old.game_hash());
+        anyhow::ensure!(at_4.game_hash() == old.game_hash());
+        // Naming L1 block 6, so up to L1 block 5: below a fork height of 6 nothing changes. With the fork at 4 the buy in L1 block
+        // 5 has 143 left: 10,000 + 20,000 * 1 / 138 = 10,144 ppm.
+        let (old, at_6, at_4) =
+            (price(&no_fork, 6)?, price(&fork_at_6, 6)?, price(&fork_at_4, 6)?);
+        anyhow::ensure!(old.game.height == 5 && old.game.price == 1_020_100);
+        anyhow::ensure!(at_6.game_hash() == old.game_hash());
+        anyhow::ensure!(at_4.game.price == 1_020_245);
+        anyhow::ensure!(at_4.game_hash() != old.game_hash());
+        // Naming L1 block 7, so up to L1 block 6, which has 142 left: 10,289 ppm where the fork is active.
+        let (old, at_6, at_4) =
+            (price(&no_fork, 7)?, price(&fork_at_6, 7)?, price(&fork_at_4, 7)?);
+        anyhow::ensure!(old.game.height == 6 && old.game.price == 1_030_301);
+        anyhow::ensure!(at_6.game.price == 1_030_595);
+        anyhow::ensure!(at_6.game_hash() != old.game_hash());
+        anyhow::ensure!(at_4.game.price == 1_030_742);
+        // Nothing else about the buys differs: same clock, deadline and keys.
+        for advance in [&at_6, &at_4] {
+            let (game, old) = (&advance.game, &old.game);
+            anyhow::ensure!(game.clock == 3 && game.clock == old.clock);
+            anyhow::ensure!(game.deadline == old.deadline);
+            anyhow::ensure!(game.accounts[&player].keys == 3);
+            anyhow::ensure!(game.total() == old.total());
+        }
+        Ok(())
+    }
+
+    /// Through the node's own path, a buy with 7 blocks left takes the ramp's last step and one with 6 left
+    /// the final stretch's 10%.
+    #[test]
+    fn the_final_stretch_steps_ten_percent() -> anyhow::Result<()> {
+        // Every L1 block from 4 holds a transaction, so block h is tick h - 3 and counts 148 - h blocks left:
+        // 7 at L1 block 141 and 6 at 142. Those two hold a buy.
+        let fixture =
+            Fixture::with_blocks("game-final-stretch", 143, |height| {
+                (height >= 4).then(|| match height {
+                    141 | 142 => vec![buy(u64::from(height))],
+                    _ => Vec::new(),
+                })
+            })?;
+        let fund = [(fixture.player_key(), sat(100_000_000))];
+        let fork = config_with(Some(4), None);
+        let no_fork = config_with(None, Some(4));
+        let first = fixture.advance(Some(&fork), 4, None, &fund)?.unwrap();
+        let parent = Some(store_first_block(&fixture, &first, 4)?);
+        let at = |config: &Config, named: u32| {
+            fixture
+                .advance(Some(config), named, parent, &[])
+                .map(|advance| advance.unwrap().game)
+        };
+        // A Sidepot block naming L1 block N processes up to N - 1. Before the buys the state shows 8 left and
+        // says what the next buy would meet.
+        let game = at(&fork, 141)?;
+        anyhow::ensure!(game.height == 140 && game.deadline - game.clock == 8);
+        let next = game.next_buy(&fork.fork());
+        anyhow::ensure!((next.left, next.step_ppm) == (7, 29_855));
+        anyhow::ensure!(game.next_buy(&no_fork.fork()).step_ppm == 10_000);
+        let game = at(&fork, 142)?;
+        anyhow::ensure!(game.height == 141 && game.price == 1_029_855);
+        let next = game.next_buy(&fork.fork());
+        anyhow::ensure!((next.left, next.step_ppm) == (6, 100_000));
+        anyhow::ensure!(next.price_after == 1_132_840);
+        let game = at(&fork, 143)?;
+        anyhow::ensure!(game.height == 142 && game.price == 1_132_840);
+        // The buy with 6 left moved the deadline to 6 past its block, as before the fork.
+        anyhow::ensure!(game.deadline - game.clock == 6);
+        let old = at(&no_fork, 143)?;
+        anyhow::ensure!(old.price == 1_020_100);
+        anyhow::ensure!((old.deadline, old.clock) == (game.deadline, game.clock));
         Ok(())
     }
 

@@ -249,14 +249,18 @@ impl Sidepot {
             ui.label("At most");
             ui.monospace(format!(
                 "{} ECX",
-                ecx(keys.saturating_mul(play::default_max_price(price)))
+                ecx(keys
+                    .saturating_mul(play::default_max_price(&view.preview)))
             ));
             ui.end_row();
         });
-        ui.label(
-            "The price rises 1% after each block with a buy. If it passes your limit, or three counted \
-             blocks go by, the buy lapses and costs only the eCash fee.",
-        );
+        let step_ppm =
+            view.preview.next_buy(&thunder::game::fork()).step_ppm;
+        ui.label(format!(
+            "The price rises after each block with a buy; the next such block raises it {}%. If it passes \
+             your limit, or three counted blocks go by, the buy lapses and costs only the eCash fee.",
+            step_ppm as f64 / 10_000.0
+        ));
         let label = if view.open() {
             format!(
                 "Buy {} {}",

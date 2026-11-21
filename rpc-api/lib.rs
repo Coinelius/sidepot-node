@@ -423,7 +423,11 @@ pub mod node {
         ) -> RpcResult<serde_json::Value>;
 
         /// Sidepot: the game at the tip: L1 height processed, clock, round, deadline, price, pot, bonus pool
-        /// and current streak. Null before the first block.
+        /// and current streak. `left` is the counted blocks left on the clock; `next_left` and `next_step_ppm`
+        /// are the blocks left as the next counted L1 block is counted and the price step it applies if it
+        /// holds a buy (parts per million). `preview` is the same for the game run on to the L1 tip.
+        /// `fork_height` and `coin_deposits_height` are the activation heights this node was started with.
+        /// Null before the first block.
         #[method(name = "game_state")]
         async fn game_state(&self) -> RpcResult<serde_json::Value>;
 

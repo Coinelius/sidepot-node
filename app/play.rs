@@ -19,15 +19,20 @@ pub const DEFAULT_ENTRY_FEE_SATS: u64 = 1_000;
 /// Sidechain fee of a `game_fund` transaction when none is given.
 pub const DEFAULT_FUND_FEE_SATS: u64 = 1_000;
 
-/// The price one step up: 1% per L1 block with a buy.
-pub fn step_price(price: u64) -> u64 {
-    let stepped = u128::from(price) * 101 / 100;
-    u64::try_from(stepped).unwrap_or(u64::MAX)
-}
-
-/// The most a buy pays per key by default: the price after `BUY_WINDOW` steps.
-pub fn default_max_price(price: u64) -> u64 {
-    (0..BUY_WINDOW).fold(price, |price, _| step_price(price))
+/// The most a buy pays per key by default: the price after `BUY_WINDOW` steps, taking each of the next
+/// `BUY_WINDOW` counted L1 blocks to hold a buy. A step is 1% until the fork's price rule is active; from then
+/// it depends on the blocks left on the clock, so the limit leaves more room near the end of a round. This is
+/// this wallet's default only: the rules take any limit an entry names.
+pub fn default_max_price(game: &Game) -> u64 {
+    let fork = thunder::game::fork();
+    let next = game.next_buy(&fork);
+    (0..BUY_WINDOW).fold(game.price, |price, i| {
+        // Each block counts one fewer left; a buy near the end can only keep the round in its final stretch.
+        let left = next.left.saturating_sub(i);
+        let height = game.height.saturating_add(1 + i);
+        let step_ppm = fork.step_ppm(&game.params, height, left);
+        sidepot_core::game::step_price(price, step_ppm)
+    })
 }
 
 /// One account as the game holds it.
@@ -251,7 +256,7 @@ impl App {
         }
         let game = &view.preview;
         let max_price =
-            max_price_sats.unwrap_or_else(|| default_max_price(game.price));
+            max_price_sats.unwrap_or_else(|| default_max_price(game));
         if max_price < game.price {
             return Err(game_err(format!(
                 "the price is {} sats per key, above the limit of {max_price}",

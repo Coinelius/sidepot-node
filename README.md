@@ -75,7 +75,11 @@ Where coin deposits are active, the node's own wallet can also fund a game accou
 sidepot-node-cli game-fund 20000000                           # this node's game account; --account <key> for another
 ```
 
-Coin deposits are a consensus rule that is off unless every node of a network is started with the same `--game-coin-deposits-height <eCash height>`. No network has a default, and mainnet has no height yet: without the flag a transaction or block holding such an output is invalid.
+Coin deposits are part of a pending fork: consensus rules that are off unless every node of a network is started with the same `--game-fork-height <eCash height>`. No network has a default, and mainnet has no height yet: without the flag a transaction or block holding such an output is invalid.
+
+The fork's other rule changes the price step. Today a block with a buy raises the key price 1%. From the fork height, an eCash block with a buy raises it by the blocks left on the round's clock as that block is counted: 10% with 6 or fewer left, and before that on a ramp from 1% with all 144 left towards 3% (`10,000 + 20,000 × (144 − left) / 138` parts per million, rounded down: 2.9855% with 7 left). `game-state` reports `left`, and as `next_left` and `next_step_ppm` what the next counted block would apply. The game state and its hash do not change before the fork height, so a node with the flag validates the same chain up to it as a node without.
+
+Coin deposits key on the eCash block a Sidepot block's BMM request names; the price step keys on each eCash block the game processes. Test networks can give coin deposits their own height with `--game-coin-deposits-height` (refused on mainnet), for a test chain that held coin deposits before the price rule existed.
 
 The desktop window's Sidepot tab does the same.
 

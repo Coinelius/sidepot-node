@@ -269,10 +269,19 @@ pub(super) struct Cli {
     /// this node produces. Without it, bonuses go to an account nobody can cash out.
     #[arg(long, value_parser = parse_account_key)]
     producer_key: Option<[u8; 32]>,
-    /// Sidepot: coin deposits from this L1 height: a Sidepot block may hold game deposit outputs (an ordinary
-    /// coin moved into a game account by a sidechain transaction) only if the L1 block its BMM request names
-    /// is at this height or above. A consensus rule: every node of a network must use the same value. No
-    /// network has a default; without this flag such outputs are never valid.
+    /// Sidepot: the pending fork's activation height on L1. One height turns on every pending rule. Coin
+    /// deposits: a Sidepot block may hold game deposit outputs (an ordinary coin moved into a game account by
+    /// a sidechain transaction) only if the L1 block its BMM request names is at this height or above. The
+    /// price step by blocks left: an L1 block at this height or above with a buy steps the key price by the
+    /// blocks left on the round's clock (1% rising to 3%, then 10% in the final 6) instead of a flat 1%.
+    /// Consensus rules: every node of a network must use the same value. No network has a default; without
+    /// this flag neither rule is ever active.
+    #[arg(long)]
+    game_fork_height: Option<u32>,
+    /// Sidepot, test networks only: a different activation height for coin deposits alone, for a test chain
+    /// that held coin deposits before the rest of the fork existed. With `--game-fork-height` it replaces
+    /// that height for coin deposits; without, it turns on coin deposits only. Refused on mainnet, where the
+    /// fork has one height.
     #[arg(long)]
     game_coin_deposits_height: Option<u32>,
 }
@@ -308,6 +317,14 @@ impl Cli {
             saturating_pred_level(self.log_level)
         };
         let wallet_dir = self.wallet_dir.unwrap_or_else(|| datadir.clone());
+        if self.game_coin_deposits_height.is_some()
+            && self.network == Network::Mainnet
+        {
+            anyhow::bail!(
+                "--game-coin-deposits-height is for test networks; on mainnet the fork has one height, \
+                 --game-fork-height"
+            );
+        }
         let game_config = thunder::game::Config {
             start_height: self.game_start_height,
             anchor: {
@@ -319,7 +336,8 @@ impl Cli {
             l1_rpc_cookie: self.l1_rpc_cookie,
             l1_rpc_userpass: self.l1_rpc_userpass,
             producer: self.producer_key.unwrap_or([0; 32]),
-            coin_deposits_height: self.game_coin_deposits_height,
+            fork_height: self.game_fork_height,
+            coin_deposits_height_override: self.game_coin_deposits_height,
         };
         if thunder::game::set_config(game_config).is_err() {
             anyhow::bail!("the game config was already set");

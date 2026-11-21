@@ -142,5 +142,13 @@ branch = "temp-dir-leak"
 git = "https://github.com/torkelrogstad/tokio-tracing.git"
 branch = "log-rotation-size"
 
+# NOT FOR RELEASE. The fork-rules branch of the game rules is not pushed, so the node is built against a local
+# copy of it, expected beside this repository (on the build machine: /root/sidepot-rules-fork, branch fork-rules
+# of https://github.com/Coinelius/sidepot). Before a release: push that branch, set the pushed commit as the
+# `rev` of sidepot-core in lib/Cargo.toml and app/Cargo.toml, delete this section, and run
+# `cargo update -p sidepot-core` so Cargo.lock names the git revision again (the release build uses --locked).
+[patch."https://github.com/Coinelius/sidepot"]
+sidepot-core = { path = "../sidepot-rules-fork/crates/sidepot-core" }
+
 [profile.release]
 # lto = "fat"

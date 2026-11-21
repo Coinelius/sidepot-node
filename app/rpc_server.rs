@@ -36,11 +36,22 @@ where
 
 /// Sidepot: a game state as the RPC reports it.
 fn game_json(game: &sidepot_core::Game) -> serde_json::Value {
+    // What a buy in the next counted L1 block would meet, under the rules this node runs (the fork height it
+    // was started with, if any), taking that block to be the one after `l1_height`.
+    let next = game.next_buy(&thunder::game::fork());
     serde_json::json!({
         "l1_height": game.height,
         "clock": game.clock,
         "round": game.round,
         "deadline": game.deadline,
+        // Counted blocks left on the clock in this state: deadline - clock.
+        "left": game.deadline.saturating_sub(game.clock),
+        // The blocks left as the next counted block is counted (`left` less that block's own tick, or a full
+        // round if that block ends this one), and the step that block applies to the price if it holds a
+        // buy, in parts per million: 10000 is 1%. The step after that follows `next_price_after_sats`.
+        "next_left": next.left,
+        "next_step_ppm": next.step_ppm,
+        "next_price_after_sats": next.price_after,
         "price_sats": game.price,
         "pot_sats": game.pot,
         "bonus_pool_sats": game.streak_pool,
@@ -501,6 +512,14 @@ impl<const ENABLE_PRIVATE_API: bool> rpc_api::node::RpcServer
             return Ok(serde_json::Value::Null);
         };
         let mut state = game_json(&game);
+        // The consensus settings this node was started with: null where a rule has no activation height.
+        let config = thunder::game::config();
+        state["fork_height"] = config
+            .and_then(|config| config.fork_height)
+            .map_or(serde_json::Value::Null, Into::into);
+        state["coin_deposits_height"] = config
+            .and_then(|config| config.coin_deposits_height())
+            .map_or(serde_json::Value::Null, Into::into);
         state["start_height"] = thunder::game::config()
             .map_or(serde_json::Value::Null, |config| {
                 config.start_height.into()
